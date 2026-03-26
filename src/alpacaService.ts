@@ -28,10 +28,14 @@ export async function getAccount(): Promise<AccountInfo> {
 export async function get15mBars(symbol: string, limit: number = 50): Promise<Bar[]> {
   const bars: Bar[] = [];
 
+  const start = new Date();
+  start.setDate(start.getDate() - 7);
+
   const response = alpaca.getBarsV2(symbol, {
     timeframe: '15Min',
     limit,
-    feed: 'iex',          // IEX feed works on paper accounts without a data subscription
+    feed: 'iex',
+    start: start.toISOString(),
   });
 
   for await (const bar of response) {
