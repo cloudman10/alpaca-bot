@@ -44,9 +44,9 @@ Two autonomous trading bots running via Alpaca Markets paper trading accounts.
 - **Account ID**: PA3CSLKA75S0
 - **Starting Capital**: $100,000
 - **Repo**: `cloudman10/alpaca-bot`
-- **Language**: TypeScript (Node.js)
-- **Main file**: `src/index.ts`
-- **Run script**: `start-bot.bat` (Windows), `start-alpaca-bot.sh` (Mac)
+- **Language**: Python
+- **Main file**: `main.py`
+- **Run script**: `python main.py` (all platforms)
 - **Folder**: `C:\Users\eriyun\alpaca-bot` (Windows), `~/Desktop/alpaca-bot` (Mac)
 
 ### Trading Strategy
@@ -62,16 +62,15 @@ Two autonomous trading bots running via Alpaca Markets paper trading accounts.
 - `APCA_API_BASE_URL=https://paper-api.alpaca.markets`
 
 ### Running Status
-- ✅ Windows PC: Running
-- ✅ Mac: Running (`node dist/index.js` from `~/Desktop/alpaca-bot`)
+- ✅ Windows PC2: Running
+- ✅ Mac: Running
 
-### Mac Setup Steps
+### Setup Steps (all platforms)
 1. `git clone https://github.com/cloudman10/alpaca-bot.git`
-2. `cd ~/Desktop/alpaca-bot`
-3. `npm install`
+2. `cd alpaca-bot`
+3. `pip3 install -r requirements.txt`
 4. Create `.env` with keys above
-5. `npx tsc` to compile TypeScript
-6. `node dist/index.js` to run
+5. `python3 main.py` to run
 
 ---
 
