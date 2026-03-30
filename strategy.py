@@ -1,17 +1,15 @@
 """
 strategy.py — Ross Cameron 15-minute Momentum signal detection.
 
-LONG setup (all four conditions):
+LONG setup (3 conditions):
   1. RSI < 30
   2. Previous candle touched lower Bollinger Band (low <= lower BB)
   3. Bullish engulfing pattern
-  4. Current candle closes inside band with higher low
 
-SHORT setup (mirror):
+SHORT setup (3 conditions):
   1. RSI > 70
   2. Previous candle pierced upper Bollinger Band (high >= upper BB)
   3. Bearish engulfing pattern
-  4. Current candle closes inside band with lower high
 
 Stop-loss: outer BB of the trigger candle
 Take-profit: 1:2 risk-to-reward
@@ -57,11 +55,10 @@ def detect_signal(symbol: str, df: pd.DataFrame) -> dict | None:
 
     # ── LONG setup ───────────────────────────────────────────────────────
     long_cond1 = last_rsi < RSI_OVERSOLD
-    long_cond2 = bar_n1["low"] <= bb_lower_n1                         # touched lower band
-    long_cond3 = is_bullish_engulfing(bar_n1, bar_n)                  # engulfing
-    long_cond4 = bar_n["close"] > bb_lower_n and bar_n["low"] > bar_n1["low"]  # inside + higher low
+    long_cond2 = bar_n1["low"] <= bb_lower_n1        # touched lower band
+    long_cond3 = is_bullish_engulfing(bar_n1, bar_n) # engulfing
 
-    if long_cond1 and long_cond2 and long_cond3 and long_cond4:
+    if long_cond1 and long_cond2 and long_cond3:
         entry = bar_n["close"]
         stop_loss = bb_lower_n1
         take_profit = calc_take_profit(entry, stop_loss, "LONG")
@@ -75,17 +72,16 @@ def detect_signal(symbol: str, df: pd.DataFrame) -> dict | None:
             "reason": (
                 f"LONG | RSI={last_rsi:.1f} | "
                 f"LowTouchedBB({bar_n1['low']:.2f} <= {bb_lower_n1:.2f}) | "
-                f"BullishEngulfing | ClosedInsideBand"
+                f"BullishEngulfing"
             ),
         }
 
     # ── SHORT setup ──────────────────────────────────────────────────────
     short_cond1 = last_rsi > RSI_OVERBOUGHT
-    short_cond2 = bar_n1["high"] >= bb_upper_n1                        # pierced upper band
-    short_cond3 = is_bearish_engulfing(bar_n1, bar_n)                  # engulfing
-    short_cond4 = bar_n["close"] < bb_upper_n and bar_n["high"] < bar_n1["high"]  # inside + lower high
+    short_cond2 = bar_n1["high"] >= bb_upper_n1       # pierced upper band
+    short_cond3 = is_bearish_engulfing(bar_n1, bar_n) # engulfing
 
-    if short_cond1 and short_cond2 and short_cond3 and short_cond4:
+    if short_cond1 and short_cond2 and short_cond3:
         entry = bar_n["close"]
         stop_loss = bb_upper_n1
         take_profit = calc_take_profit(entry, stop_loss, "SHORT")
@@ -99,7 +95,7 @@ def detect_signal(symbol: str, df: pd.DataFrame) -> dict | None:
             "reason": (
                 f"SHORT | RSI={last_rsi:.1f} | "
                 f"HighPiercedBB({bar_n1['high']:.2f} >= {bb_upper_n1:.2f}) | "
-                f"BearishEngulfing | ClosedInsideBand"
+                f"BearishEngulfing"
             ),
         }
 

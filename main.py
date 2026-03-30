@@ -1,6 +1,6 @@
 """
 main.py — Entry point for the Ross Cameron 15m Momentum trading bot.
-Heartbeat loop scans the watchlist every 60 seconds.
+Heartbeat loop scans the watchlist every 15 seconds.
 """
 
 import sys
@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 # ── Config ───────────────────────────────────────────────────────────────────
 
 WATCHLIST = ["SPY", "QQQ", "AAPL", "TSLA", "NVDA", "AMD", "META"]
-HEARTBEAT_SEC = 60
+HEARTBEAT_SEC = 15
 BAR_LIMIT = 50
 
 # ── State ────────────────────────────────────────────────────────────────────
