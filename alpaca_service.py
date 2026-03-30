@@ -17,7 +17,7 @@ from alpaca.trading.requests import (
 from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
-from alpaca.data.timeframe import TimeFrame
+from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
 load_dotenv()
 
@@ -53,7 +53,7 @@ def get_15m_bars(symbol: str, limit: int = 50) -> pd.DataFrame:
 
     request = StockBarsRequest(
         symbol_or_symbols=symbol,
-        timeframe=TimeFrame(15, "Min"),
+        timeframe=TimeFrame(amount=15, unit=TimeFrameUnit.Minute),
         start=start,
         limit=limit,
         feed="iex",
