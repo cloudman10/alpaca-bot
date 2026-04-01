@@ -126,9 +126,9 @@ def build_signals(ohlcv: dict) -> tuple:
     bear_wrap      = (open_ >= close.shift(1)) & (close <= open_.shift(1))
     bearish_engulf = prev_bull & curr_bear & bear_wrap
 
-    # ── Entry conditions ─────────────────────────────────────────────────────
-    long_entries  = (rsi < 30) & (low.shift(1)  <= bb_lower.shift(1)) & bullish_engulf
-    short_entries = (rsi > 70) & (high.shift(1) >= bb_upper.shift(1)) & bearish_engulf
+    # ── Entry conditions (simplified: RSI extreme + BB touch, no engulfing) ──
+    long_entries  = (rsi < 30) & (low.shift(1)  <= bb_lower.shift(1))
+    short_entries = (rsi > 70) & (high.shift(1) >= bb_upper.shift(1))
 
     # Resolve conflicts (same bar/symbol): long takes priority
     conflict      = long_entries & short_entries
