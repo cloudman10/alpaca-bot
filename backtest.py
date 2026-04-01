@@ -1,7 +1,7 @@
 """
 backtest.py — VectorBT backtest for the Ross Cameron Momentum Strategy (Bot 2).
 
-Strategy signals on daily bars:
+Strategy signals on 15-minute bars:
   LONG : RSI(14) < 30  +  prev candle low <= lower BB  +  Bullish Engulfing
   SHORT: RSI(14) > 70  +  prev candle high >= upper BB  +  Bearish Engulfing
 
@@ -41,11 +41,11 @@ OUTPUT_FILE   = "backtest_results.png"
 
 
 # ── Data fetching ─────────────────────────────────────────────────────────────
-def fetch_daily_bars(symbols: list[str]) -> dict[str, pd.DataFrame]:
-    """Return dict of wide DataFrames (date × symbol) for open/high/low/close/volume."""
+def fetch_15min_bars(symbols: list[str]) -> dict[str, pd.DataFrame]:
+    """Return dict of wide DataFrames (datetime × symbol) for open/high/low/close/volume."""
     from alpaca.data.historical import StockHistoricalDataClient
     from alpaca.data.requests import StockBarsRequest
-    from alpaca.data.timeframe import TimeFrame
+    from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
     api_key    = os.getenv("ALPACA_API_KEY_ID", "")
     secret_key = os.getenv("ALPACA_API_SECRET_KEY", "")
@@ -57,10 +57,12 @@ def fetch_daily_bars(symbols: list[str]) -> dict[str, pd.DataFrame]:
     end    = datetime.now(timezone.utc)
     start  = end - timedelta(days=365)
 
-    print(f"Fetching {len(symbols)} symbols: {start.date()} → {end.date()} (IEX feed) ...")
+    print(f"Fetching {len(symbols)} symbols: {start.date()} → {end.date()} "
+          f"(15-min bars, IEX feed) ...")
+    print("This may take a moment — ~6,500 bars per symbol ...")
     req = StockBarsRequest(
         symbol_or_symbols=symbols,
-        timeframe=TimeFrame.Day,
+        timeframe=TimeFrame(amount=15, unit=TimeFrameUnit.Minute),
         start=start,
         end=end,
         feed="iex",
@@ -70,12 +72,12 @@ def fetch_daily_bars(symbols: list[str]) -> dict[str, pd.DataFrame]:
     ohlcv: dict[str, pd.DataFrame] = {}
     for field in ("open", "high", "low", "close", "volume"):
         pivot = raw[field].unstack(level=0)           # timestamp × symbol
-        pivot.index = pd.DatetimeIndex(pivot.index).normalize()
+        pivot.index = pd.DatetimeIndex(pivot.index)   # keep full datetime (no normalize)
         pivot = pivot[symbols]                         # ensure column order
         ohlcv[field] = pivot.dropna(how="all")
 
     rows = len(ohlcv["close"])
-    print(f"Loaded {rows} trading days per symbol.")
+    print(f"Loaded {rows} 15-min bars per symbol.")
     return ohlcv
 
 
@@ -183,7 +185,7 @@ def run_backtest(ohlcv: dict) -> vbt.Portfolio:
         size_type     = "value",
         init_cash     = INIT_CASH,
         fees          = FEE_PCT,
-        freq          = "1D",
+        freq          = "15min",
         group_by      = True,
         cash_sharing  = True,
     )
@@ -203,7 +205,7 @@ def print_results(pf: vbt.Portfolio) -> None:
     print("  Bot 2 — Ross Cameron Strategy  |  VectorBT Backtest")
     print("=" * 58)
     print(f"  Symbols         : {', '.join(WATCHLIST)}")
-    print(f"  Timeframe       : 1 year daily bars")
+    print(f"  Timeframe       : 1 year 15-minute bars")
     print(f"  Starting Capital: ${INIT_CASH:>12,.0f}")
     print(f"  Fees            : {FEE_PCT * 100:.1f}% per trade")
     print(f"  Risk per trade  : {RISK_PCT * 100:.1f}%  (1:2 R:R)")
@@ -228,7 +230,7 @@ def save_chart(pf: vbt.Portfolio) -> None:
 
     fig, axes = plt.subplots(3, 1, figsize=(14, 11))
     fig.suptitle(
-        "Bot 2 — Ross Cameron Momentum Strategy  |  VectorBT Backtest (1 Year Daily)",
+        "Bot 2 — Ross Cameron Momentum Strategy  |  VectorBT Backtest (1 Year, 15-Min Bars)",
         fontsize=13, fontweight="bold", y=0.98,
     )
 
@@ -280,7 +282,7 @@ def main() -> None:
     print("\nBot 2 — Ross Cameron Strategy  |  VectorBT Backtest")
     print("-" * 50)
 
-    ohlcv = fetch_daily_bars(WATCHLIST)
+    ohlcv = fetch_15min_bars(WATCHLIST)
     pf    = run_backtest(ohlcv)
     print_results(pf)
     save_chart(pf)
