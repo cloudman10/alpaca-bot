@@ -51,10 +51,35 @@ Two autonomous trading bots running via Alpaca Markets paper trading accounts.
 
 ### Trading Strategy
 - Ross Cameron 15-minute momentum strategy
-- Watchlist: SPY, QQQ, AAPL, TSLA, NVDA, AMD, META
-- RSI-based entry/exit signals
-- KillSwitch: 3% daily loss limit ($3,000)
-- Heartbeat: 60 seconds
+- **Dynamic watchlist** — rebuilt every morning via pre-market gap scanner (see below)
+- Entry: RSI(14) < 30 + lower Bollinger Band touch + Bullish Engulfing candle → LONG
+- Exit: RSI(14) > 70 + upper Bollinger Band pierce + Bearish Engulfing → SHORT / close
+- KillSwitch: 3% daily loss limit
+- Heartbeat: 15 seconds
+
+### Pre-market Gap Scanner (`scanner.py`)
+
+Runs automatically at **9:00 AM ET** every trading day. Replaces the fixed watchlist with high-momentum candidates.
+
+**Daily timeline:**
+
+| Time (ET) | Action |
+|-----------|--------|
+| 9:00 AM | Scan ~35 volatile symbols; calculate gap % vs previous close |
+| 9:10 AM | Calculate RVOL for gap candidates |
+| 9:20 AM | Finalize dynamic watchlist (top 5 by gap %) |
+| 9:30 AM | RSI/BB/Engulfing entry logic activates |
+
+**Filters:**
+- Gap > 4% (gainers only)
+- RVOL > 2× (relative volume vs 10-day average)
+- Capped at top 5 symbols
+
+**Fallback:** If no stocks pass both filters, reverts to default watchlist: `SPY, QQQ, AAPL, TSLA, NVDA, AMD, META`
+
+**Universe scanned:** AAPL, TSLA, NVDA, AMD, META, AMZN, MSFT, GOOGL, SPY, QQQ, SMCI, MSTR, COIN, HOOD, PLTR, RIVN, SOFI, UPST, SNAP, RBLX, SHOP, SQ, PYPL, ROKU, UBER, DKNG, PENN, GME, AMC, CVNA, BYND, SPCE (32 symbols)
+
+> **Note on IEX pre-market data:** IEX free tier may not provide bars before 9:30 AM. If pre-market prices are unavailable, the scanner falls back to today's open vs yesterday's close (calculated at 9:30 AM first bar). Gap + RVOL filters still apply.
 
 ### API Keys
 - `APCA_API_KEY_ID=PKF72BM5QBJL2PKUKM5FPLK5ML`
