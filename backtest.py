@@ -30,7 +30,7 @@ warnings.filterwarnings("ignore")
 load_dotenv()
 
 # ── Config ────────────────────────────────────────────────────────────────────
-WATCHLIST     = ["SPY", "QQQ", "AAPL", "TSLA", "NVDA", "AMD", "META"]
+WATCHLIST     = ["SMCI", "MSTR", "COIN", "HOOD", "TSLA", "NVDA", "AMD"]
 INIT_CASH     = 100_000.0
 RISK_PCT      = 0.01          # 1% of capital risked per trade
 REWARD_RATIO  = 2.0           # 1:2 risk-to-reward
