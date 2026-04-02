@@ -49,12 +49,28 @@ Two autonomous trading bots running via Alpaca Markets paper trading accounts.
 - **Run script**: `python main.py` (all platforms)
 - **Folder**: `C:\Users\eriyun\alpaca-bot` (Windows), `~/Desktop/alpaca-bot` (Mac)
 
-### Trading Strategy
-- Ross Cameron 15-minute momentum strategy
+### Current Entry Logic (as of Apr 3, 2026)
+
+**LONG entry — ALL must be true:**
+1. RSI < 25 (deeply oversold)
+2. Price touched lower Bollinger Band
+3. Bullish Engulfing candle pattern
+4. Volume > 2× 20-bar average (volume climax)
+5. SPY not making new lows in last 3 minutes
+
+**SHORT entry — ALL must be true:**
+1. RSI > 70 (overbought)
+2. Price pierced upper Bollinger Band
+3. Bearish Engulfing candle pattern
+4. Volume > 2× 20-bar average
+
+**Exit logic:**
+- Take profit: VWAP level (falls back to 1:2 R:R if VWAP not valid)
+- Stop loss: outer Bollinger Band
+- Daily kill switch: 3% loss
+
+**Other:**
 - **Dynamic watchlist** — rebuilt every morning via pre-market gap scanner (see below)
-- Entry: RSI(14) < 30 + lower Bollinger Band touch + Bullish Engulfing candle → LONG
-- Exit: RSI(14) > 70 + upper Bollinger Band pierce + Bearish Engulfing → SHORT / close
-- KillSwitch: 3% daily loss limit
 - Heartbeat: 15 seconds
 
 ### Pre-market Gap Scanner (`scanner.py`)
@@ -106,6 +122,23 @@ Runs automatically at **9:00 AM ET** every trading day. Replaces the fixed watch
 | Windows PC1 (eriyun) | ✅ Running | ✅ Running |
 | Windows PC2 (Admin) | ✅ Running | ❌ Not set up |
 | MacBook Pro (ericyun) | ✅ Running | ✅ Running |
+
+---
+
+## Optimization History
+
+| Date | Change | Reason | Result |
+|------|--------|--------|--------|
+| Mar 28 | Converted from TypeScript to Python | Better library support, consistency with Bot 1 | ✅ Done |
+| Mar 30 | Fixed TimeFrame bug in `get_15m_bars` | Bot was failing to fetch bars silently | ✅ Fixed |
+| Mar 30 | Relaxed engulfing condition, heartbeat 60s→15s | No trades firing | ✅ More responsive |
+| Mar 31 | Restored engulfing condition | Backtest showed it's the edge — without it win rate drops to 38% | ✅ Restored |
+| Apr 1 | Added pre-market gap scanner + RVOL filter | Fixed watchlist was missing daily movers | ✅ Dynamic watchlist |
+| Apr 2 | Added file logging to `logs/bot.log` | Could not debug what happened during market hours | ✅ Done |
+| Apr 3 | Lowered RSI from 30 to 25 | TSLA hit RSI 20, AAPL RSI 28 — old threshold too high | ✅ Done |
+| Apr 3 | Added volume climax filter (2× avg) | Confirms capitulation before bounce | ✅ Done |
+| Apr 3 | Added VWAP take profit | Smarter exit than fixed 1:2 R:R | ✅ Done |
+| Apr 3 | Added SPY stabilization filter (3 min) | Prevents buying into still-falling market | ✅ Done |
 
 ---
 
