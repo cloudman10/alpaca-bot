@@ -10,10 +10,12 @@ Daily schedule (Eastern time):
 Heartbeat loop: scans the watchlist every 15 seconds during market hours.
 """
 
+import os
 import sys
 import signal
 import time
 import logging
+from logging.handlers import TimedRotatingFileHandler
 from datetime import date as Date, datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -33,13 +35,20 @@ from scanner import run_gap_scanner, DEFAULT_WATCHLIST
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="[%(asctime)s] %(message)s",
-    datefmt="%Y-%m-%dT%H:%M:%SZ",
-    handlers=[logging.StreamHandler(sys.stdout)],
+os.makedirs("logs", exist_ok=True)
+
+_log_fmt = logging.Formatter("[%(asctime)s] %(message)s", datefmt="%Y-%m-%dT%H:%M:%SZ")
+_log_fmt.converter = time.gmtime
+
+_file_handler = TimedRotatingFileHandler(
+    "logs/bot.log", when="midnight", backupCount=7, utc=True
 )
-logging.Formatter.converter = time.gmtime
+_file_handler.setFormatter(_log_fmt)
+
+_stream_handler = logging.StreamHandler(sys.stdout)
+_stream_handler.setFormatter(_log_fmt)
+
+logging.basicConfig(level=logging.INFO, handlers=[_stream_handler, _file_handler])
 logger = logging.getLogger(__name__)
 
 # ── Config ────────────────────────────────────────────────────────────────────
