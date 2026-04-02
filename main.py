@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo
 
 from alpaca_service import (
     get_balance,
+    get_1m_bars,
     get_15m_bars,
     place_bracket_order,
     close_all_positions,
@@ -101,6 +102,33 @@ def _is_weekday() -> bool:
 
 
 # ── Scanner ───────────────────────────────────────────────────────────────────
+
+def _spy_is_stable() -> bool:
+    """
+    SPY stabilization filter: returns True only if SPY has NOT made a new low
+    in the last 3 x 1-minute bars.
+    Prevents entering a trade into a still-falling market.
+    Returns True (allow entry) on any data error so the filter never hard-blocks.
+    """
+    try:
+        df = get_1m_bars("SPY", 3)
+        if len(df) < 3:
+            logger.warning("SPY: not enough 1-min bars for stabilization check — allowing entry")
+            return True
+        low_now  = df["low"].iloc[-1]
+        low_1    = df["low"].iloc[-2]
+        low_2    = df["low"].iloc[-3]
+        stable   = low_now >= low_1 and low_now >= low_2
+        if not stable:
+            logger.info(
+                "SPY stabilization FAILED: new low detected (%.2f < %.2f or %.2f) — skipping entry",
+                low_now, low_1, low_2,
+            )
+        return stable
+    except Exception as e:
+        logger.warning("SPY stabilization check error (%s) — allowing entry", e)
+        return True
+
 
 def _run_scanner_if_needed():
     """
@@ -218,7 +246,12 @@ def scan():
                     pos_size["qty"], pos_size["risk_amount"],
                 )
 
-                # 6. Check buying power
+                # 6. SPY stabilization check — don't buy into a falling market
+                if not _spy_is_stable():
+                    logger.info("[%s] SPY still falling — skipping entry.", symbol)
+                    continue
+
+                # 7. Check buying power
                 order_cost = pos_size["qty"] * signal["entry_price"]
                 if order_cost > account["buying_power"]:
                     logger.warning(
@@ -227,7 +260,7 @@ def scan():
                     )
                     continue
 
-                # 7. Place bracket order
+                # 8. Place bracket order
                 side     = "buy" if signal["direction"] == "LONG" else "sell"
                 order_id = place_bracket_order(
                     symbol,

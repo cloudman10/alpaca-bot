@@ -47,6 +47,35 @@ def get_balance() -> dict:
 
 # ── Market data ──────────────────────────────────────────────────────────────
 
+def get_1m_bars(symbol: str, limit: int = 10) -> pd.DataFrame:
+    """Fetch 1-minute bars for a symbol over the last hour using IEX feed."""
+    start = datetime.utcnow() - timedelta(hours=1)
+
+    request = StockBarsRequest(
+        symbol_or_symbols=symbol,
+        timeframe=TimeFrame(amount=1, unit=TimeFrameUnit.Minute),
+        start=start,
+        limit=limit,
+        feed="iex",
+    )
+
+    bars = data_client.get_stock_bars(request)
+    bar_list = bars[symbol]
+
+    records = []
+    for bar in bar_list:
+        records.append({
+            "time":   bar.timestamp.isoformat(),
+            "open":   float(bar.open),
+            "high":   float(bar.high),
+            "low":    float(bar.low),
+            "close":  float(bar.close),
+            "volume": int(bar.volume),
+        })
+
+    return pd.DataFrame(records)
+
+
 def get_15m_bars(symbol: str, limit: int = 50) -> pd.DataFrame:
     """Fetch 15-minute bars for a symbol over the last 7 days using IEX feed."""
     start = datetime.utcnow() - timedelta(days=7)

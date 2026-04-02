@@ -35,8 +35,24 @@ def calc_position_size(equity: float, entry: float, stop_loss: float) -> dict:
     return {"qty": qty, "risk_amount": risk_amount}
 
 
-def calc_take_profit(entry: float, stop_loss: float, direction: str) -> float:
-    """Returns take-profit price at 1:2 risk-to-reward ratio."""
+def calc_take_profit(
+    entry: float,
+    stop_loss: float,
+    direction: str,
+    vwap: float | None = None,
+) -> float:
+    """
+    Returns take-profit price.
+    Uses VWAP if it is valid for the trade direction, otherwise falls back to 1:2 R:R.
+      LONG:  valid if VWAP > entry
+      SHORT: valid if VWAP < entry
+    """
+    if vwap is not None:
+        if direction == "LONG" and vwap > entry:
+            return vwap
+        if direction == "SHORT" and vwap < entry:
+            return vwap
+
     risk = abs(entry - stop_loss)
     if direction == "LONG":
         return entry + risk * REWARD_RATIO

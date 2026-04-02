@@ -1,5 +1,6 @@
 """
-indicators.py — RSI(14), Bollinger Bands(20,2), MACD(12,26,9) + candlestick patterns.
+indicators.py — RSI(14), Bollinger Bands(20,2), MACD(12,26,9), Volume Avg(20), VWAP
+              + candlestick patterns.
 Pure pandas/numpy implementation — no external indicator library needed.
 """
 
@@ -37,11 +38,31 @@ def _macd(series: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) ->
     return macd_line, signal_line, histogram
 
 
+def _vwap(df: pd.DataFrame) -> pd.Series:
+    """
+    Compute VWAP, reset each trading day.
+    VWAP = cumsum(typical_price × volume) / cumsum(volume) per day.
+    Requires columns: high, low, close, volume, time.
+    """
+    typical_price = (df["high"] + df["low"] + df["close"]) / 3
+    tp_vol = typical_price * df["volume"]
+
+    # Group by calendar date so VWAP resets at midnight
+    dates = pd.to_datetime(df["time"]).dt.date
+
+    df_temp = df.assign(_tp_vol=tp_vol, _vol=df["volume"], _date=dates)
+    cum_tp_vol = df_temp.groupby("_date")["_tp_vol"].cumsum()
+    cum_vol    = df_temp.groupby("_date")["_vol"].cumsum()
+
+    return cum_tp_vol / cum_vol
+
+
 def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
-    """Compute RSI(14), Bollinger Bands(20,2), and MACD(12,26,9) on a bars DataFrame."""
+    """Compute RSI(14), Bollinger Bands(20,2), MACD(12,26,9), Volume Avg(20), and VWAP."""
     df = df.copy()
 
-    closes = df["close"]
+    closes  = df["close"]
+    volumes = df["volume"]
 
     # RSI
     df["RSI_14"] = _rsi(closes, 14)
@@ -51,6 +72,12 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
     # MACD
     df["MACD_12_26_9"], df["MACDs_12_26_9"], df["MACDh_12_26_9"] = _macd(closes, 12, 26, 9)
+
+    # Volume climax filter: 20-bar average volume
+    df["volume_avg_20"] = volumes.rolling(window=20).mean()
+
+    # VWAP (resets each trading day)
+    df["VWAP"] = _vwap(df)
 
     return df
 
