@@ -139,6 +139,8 @@ Runs automatically at **9:00 AM ET** every trading day. Replaces the fixed watch
 | Apr 3 | Added volume climax filter (2× avg) | Confirms capitulation before bounce | ✅ Done |
 | Apr 3 | Added VWAP take profit | Smarter exit than fixed 1:2 R:R | ✅ Done |
 | Apr 3 | Added SPY stabilization filter (3 min) | Prevents buying into still-falling market | ✅ Done |
+| Apr 4 | Fixed BEAR regime bug root cause identified | SPY RSI 29.8 caused no regime to match, falling to BEAR default | ✅ Already fixed in Apr 1 merge |
+| Apr 4 | Added detailed regime logging | Shows exact % diff and threshold each cycle | ✅ Done |
 
 ---
 
