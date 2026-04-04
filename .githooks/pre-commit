@@ -1,0 +1,55 @@
+#!/bin/bash
+# pre-commit hook: auto-append a row to TRADING_BOTS.md Optimization History
+# Runs on every commit that touches files other than TRADING_BOTS.md itself.
+
+TRADING_BOTS="TRADING_BOTS.md"
+
+# Get staged files, excluding TRADING_BOTS.md (avoid self-referential loop)
+STAGED=$(git diff --cached --name-only | grep -v "^${TRADING_BOTS}$" | tr '\n' ', ' | sed 's/, $//')
+
+# Nothing staged besides TRADING_BOTS.md — skip
+if [ -z "$STAGED" ]; then
+    exit 0
+fi
+
+# TRADING_BOTS.md must exist
+if [ ! -f "$TRADING_BOTS" ]; then
+    exit 0
+fi
+
+python3 - "$TRADING_BOTS" "$STAGED" <<'PYEOF'
+import sys
+from datetime import date
+
+filepath     = sys.argv[1]
+changed_files = sys.argv[2]
+
+today    = date.today()
+date_str = today.strftime(f"%b {today.day}")          # e.g. "Apr 4"
+new_row  = f"| {date_str} | Modified: {changed_files} | (see commit message) | ✅ Done |"
+
+with open(filepath, "r") as f:
+    lines = f.readlines()
+
+# Find the last row of the Optimization History table
+last_table_idx = -1
+in_section     = False
+for i, line in enumerate(lines):
+    if "## Optimization History" in line:
+        in_section = True
+    if in_section and line.strip().startswith("|"):
+        last_table_idx = i
+
+if last_table_idx == -1:
+    print(f"[pre-commit] WARNING: Optimization History table not found in {filepath} — skipping")
+    sys.exit(0)
+
+lines.insert(last_table_idx + 1, new_row + "\n")
+
+with open(filepath, "w") as f:
+    f.writelines(lines)
+
+print(f"[pre-commit] TRADING_BOTS.md updated: {changed_files}")
+PYEOF
+
+git add "$TRADING_BOTS"

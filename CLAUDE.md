@@ -10,3 +10,6 @@ Every time you make ANY code change to this project, you MUST:
 4. Never make a code commit without updating TRADING_BOTS.md
 
 This is non-negotiable. Every change must be documented.
+
+## New Machine Setup
+After cloning on a new machine, run: bash setup.sh to activate the auto-update hooks.
