@@ -50,7 +50,7 @@ SCAN_UNIVERSE = [
 DEFAULT_WATCHLIST = ["SPY", "QQQ", "AAPL", "TSLA", "NVDA", "AMD", "META"]
 
 GAP_MIN_PCT = 0.04   # 4% minimum gap (gainers only)
-RVOL_MIN    = 2.0    # 2× relative volume minimum
+RVOL_MIN    = 1.5    # 1.5× relative volume minimum (loosened from 2.0× for volatile market)
 MAX_SYMBOLS = 5      # cap dynamic watchlist at 5
 
 

@@ -143,6 +143,7 @@ Runs automatically at **9:00 AM ET** every trading day. Replaces the fixed watch
 | Apr 4 | Added detailed regime logging | Shows exact % diff and threshold each cycle | ✅ Done |
 | Apr 4 | Modified: requirements.txt, | (see commit message) | ✅ Done |
 | Apr 4 | Modified: .githooks/pre-commit,CLAUDE.md,setup.sh, | (see commit message) | ✅ Done |
+| Apr 9 | Modified: scanner.py, | (see commit message) | ✅ Done |
 
 ---
 
