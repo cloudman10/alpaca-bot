@@ -16,7 +16,7 @@ import signal
 import time
 import logging
 from logging.handlers import TimedRotatingFileHandler
-from datetime import date as Date, datetime, timezone
+from datetime import date as Date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from alpaca_service import (
@@ -99,6 +99,28 @@ def _in_trading_window() -> bool:
 
 def _is_weekday() -> bool:
     return _et_now().weekday() < 5  # Mon–Fri
+
+
+def _is_active_period() -> bool:
+    """True between 8:55 AM and 4:05 PM ET on weekdays (covers scanner + trading windows)."""
+    if not _is_weekday():
+        return False
+    now = _et_now()
+    h, m = now.hour, now.minute
+    after_premarket  = h > 8 or (h == 8 and m >= 55)
+    before_eod_close = h < 16 or (h == 16 and m <= 5)
+    return after_premarket and before_eod_close
+
+
+def _seconds_until_premarket() -> float:
+    """Seconds until 8:55 AM ET on the next trading weekday."""
+    now    = _et_now()
+    target = now.replace(hour=8, minute=55, second=0, microsecond=0)
+    if now >= target:
+        target += timedelta(days=1)
+    while target.weekday() >= 5:   # skip Saturday / Sunday
+        target += timedelta(days=1)
+    return (target - now).total_seconds()
 
 
 # ── Scanner ───────────────────────────────────────────────────────────────────
@@ -326,6 +348,14 @@ def main():
 
     scan()
     while True:
+        if not _is_active_period():
+            secs = _seconds_until_premarket()
+            logger.info(
+                "Outside market hours — sleeping %.1f hours until pre-market (8:55 AM ET).",
+                secs / 3600,
+            )
+            time.sleep(secs)
+            continue
         time.sleep(HEARTBEAT_SEC)
         scan()
 
