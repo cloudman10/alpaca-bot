@@ -5,7 +5,7 @@ Two autonomous trading bots running via Alpaca Markets paper trading accounts.
 
 ---
 
-## Bot 1 — Trading Strategy Engine
+## Bot 1 — Breakout Hunter
 
 - **Account**: Paper Trading - my TradingApp ($149,536.63)
 - **Account ID**: PA36MCEQOZKQ
@@ -16,12 +16,25 @@ Two autonomous trading bots running via Alpaca Markets paper trading accounts.
 - **Folder**: `C:\Users\eriyun\trading-bot` (Windows PC1), `~/TradingApp` (Mac)
 
 ### Trading Strategy
-- Technical indicators: RSI, SMA20, SMA50, SMA200, MACD, momentum, volume
-- Market regime detection (BULL / BEAR / SIDEWAYS) based on SPY vs SMA200
-- BEAR market: no new trades, only manage existing positions
-- SIDEWAYS market: only strongest signals
-- BULL market: full trading activity
+- **Breakout Hunter** — enters when price breaks above the 20-day high with momentum confirmation
+- Technical indicators: RSI(14), SMA200, ATR(14), ADX(14), 20-day high, volume
+- Market regime detection (BULL / NEUTRAL / SIDEWAYS / BEAR) based on SPY vs SMA200
 - 15-minute trading cycle
+
+**Entry conditions (all must be met):**
+1. Price > 20-day high (breakout)
+2. RSI(14) > 60 (momentum strong, not overbought)
+3. Volume > 1.5× 20-bar average
+4. ADX(14) > 20 (trending market)
+
+**Exit conditions:**
+- ATR trailing stop: `highest_high_since_entry − (2.0 × ATR14)`
+- Take-profit: 6% above entry
+- RSI > 85 (extreme overbought exit)
+- Max hold: 72 hours / 3 trading days
+- Fallback: 2.5% fixed stop loss
+
+**Position sizing:** 10% of equity per position | Max 3 positions | Kill switch: 2% daily loss
 
 ### API Keys
 - `ALPACA_API_KEY=PKYFMTR7ZCC6GJDOTYFLLJZZAX`
@@ -29,16 +42,11 @@ Two autonomous trading bots running via Alpaca Markets paper trading accounts.
 
 ### Running Status
 - ✅ Windows PC1: Running
-- ✅ Mac: Running (uses IEX data feed, SMA_LONG_PERIOD reduced to 170)
-
-### Mac-specific fixes applied
-- `market_data_agent.py`: added `feed=DataFeed.IEX` to avoid SIP subscription error
-- `core/config.py`: `SMA_LONG_PERIOD` changed from 200 to 170 (IEX data limitation)
-- Dependencies installed with `--break-system-packages`
+- ✅ Mac: Running (uses IEX data feed)
 
 ---
 
-## Bot 2 — Ross Cameron 15m Momentum
+## Bot 2 — Gap-UP Momentum Scanner
 
 - **Account**: Paper Trading - Trading App ($100,000)
 - **Account ID**: PA3CSLKA75S0
@@ -46,56 +54,50 @@ Two autonomous trading bots running via Alpaca Markets paper trading accounts.
 - **Repo**: `cloudman10/alpaca-bot`
 - **Language**: Python
 - **Main file**: `main.py`
-- **Run script**: `python main.py` (all platforms)
+- **Run script**: `bash run_bot.sh` (Mac), `python3 main.py` (all platforms)
 - **Folder**: `C:\Users\eriyun\alpaca-bot` (Windows), `~/Desktop/alpaca-bot` (Mac)
 
-### Current Entry Logic (as of Apr 3, 2026)
+### Trading Strategy
+- **Gap-UP Momentum** — scans for pre-market gap-up stocks, enters on VWAP pullback reclaim in first 30 min only
 
-**LONG entry — ALL must be true:**
-1. RSI < 25 (deeply oversold)
-2. Price touched lower Bollinger Band
-3. Bullish Engulfing candle pattern
-4. Volume > 2× 20-bar average (volume climax)
-5. SPY not making new lows in last 3 minutes
-
-**SHORT entry — ALL must be true:**
-1. RSI > 70 (overbought)
-2. Price pierced upper Bollinger Band
-3. Bearish Engulfing candle pattern
-4. Volume > 2× 20-bar average
-
-**Exit logic:**
-- Take profit: VWAP level (falls back to 1:2 R:R if VWAP not valid)
-- Stop loss: outer Bollinger Band
-- Daily kill switch: 3% loss
-
-**Other:**
-- **Dynamic watchlist** — rebuilt every morning via pre-market gap scanner (see below)
-- Heartbeat: 15 seconds
-
-### Pre-market Gap Scanner (`scanner.py`)
-
-Runs automatically at **9:00 AM ET** every trading day. Replaces the fixed watchlist with high-momentum candidates.
-
-**Daily timeline:**
+**Daily schedule (Eastern time):**
 
 | Time (ET) | Action |
 |-----------|--------|
-| 9:00 AM | Scan ~35 volatile symbols; calculate gap % vs previous close |
-| 9:10 AM | Calculate RVOL for gap candidates |
-| 9:20 AM | Finalize dynamic watchlist (top 5 by gap %) |
-| 9:30 AM | RSI/BB/Engulfing entry logic activates |
+| 9:00 AM | Gap scanner runs — gap > 2%, RVOL > 1.0× |
+| 9:20 AM | Dynamic watchlist finalized (top 5 gap-up candidates) |
+| 9:30 AM | Entry window opens: VWAP pullback + reclaim signals active |
+| 10:00 AM | Entry window closes — no new positions after first 30 min |
+| 4:00 PM | Market close; VWAP stop monitoring ends |
+
+**Entry conditions (all must be met, 9:30–10:00 AM ET only):**
+1. Previous 15m bar low touched/was at VWAP (pullback occurred)
+2. Current 15m bar closes above VWAP (bullish reclaim)
+3. Current bar is bullish (close > open)
+4. RSI(14) 45–65
+5. Volume > 1.5× 20-bar average on entry bar
+6. SPY not making new lows
+
+**Exit logic:**
+- Take profit: previous day high (if above entry) OR +4% above entry
+- Stop loss: VWAP at entry (bracket order static stop)
+- VWAP mid-session stop: if price closes below VWAP → exit immediately
+- Kill switch: 2% daily loss limit
+
+**Position sizing:** 8% of equity per position | Max 3 positions
+
+### Pre-market Gap Scanner (`scanner.py`)
 
 **Filters:**
-- Gap > 4% (gainers only)
-- RVOL > 2× (relative volume vs 10-day average)
+- Gap > 2% (gainers only)
+- RVOL > 1.0× (relative volume vs 10-day average)
 - Capped at top 5 symbols
 
-**Fallback:** If no stocks pass both filters, reverts to default watchlist: `SPY, QQQ, AAPL, TSLA, NVDA, AMD, META`
+**Fallback:** If no stocks pass filters, reverts to default watchlist: `SPY, QQQ, AAPL, TSLA, NVDA, AMD, META`
 
 **Universe scanned:** AAPL, TSLA, NVDA, AMD, META, AMZN, MSFT, GOOGL, SPY, QQQ, SMCI, MSTR, COIN, HOOD, PLTR, RIVN, SOFI, UPST, SNAP, RBLX, SHOP, SQ, PYPL, ROKU, UBER, DKNG, PENN, GME, AMC, CVNA, BYND, SPCE (32 symbols)
 
-> **Note on IEX pre-market data:** IEX free tier may not provide bars before 9:30 AM. If pre-market prices are unavailable, the scanner falls back to today's open vs yesterday's close (calculated at 9:30 AM first bar). Gap + RVOL filters still apply.
+> **Note on IEX pre-market data:** IEX free tier may not provide bars before 9:30 AM. If pre-market prices are unavailable, the scanner falls back to today's open vs yesterday's close. Gap + RVOL filters still apply.
 
 ### API Keys
 - `APCA_API_KEY_ID=PKF72BM5QBJL2PKUKM5FPLK5ML`
@@ -111,7 +113,7 @@ Runs automatically at **9:00 AM ET** every trading day. Replaces the fixed watch
 2. `cd alpaca-bot`
 3. `pip3 install -r requirements.txt`
 4. Create `.env` with keys above
-5. `python3 main.py` to run
+5. `bash run_bot.sh` to run (Mac) or `python3 main.py` (Windows)
 
 ---
 
@@ -139,15 +141,10 @@ Runs automatically at **9:00 AM ET** every trading day. Replaces the fixed watch
 | Apr 3 | Added volume climax filter (2× avg) | Confirms capitulation before bounce | ✅ Done |
 | Apr 3 | Added VWAP take profit | Smarter exit than fixed 1:2 R:R | ✅ Done |
 | Apr 3 | Added SPY stabilization filter (3 min) | Prevents buying into still-falling market | ✅ Done |
-| Apr 4 | Fixed BEAR regime bug root cause identified | SPY RSI 29.8 caused no regime to match, falling to BEAR default | ✅ Already fixed in Apr 1 merge |
-| Apr 4 | Added detailed regime logging | Shows exact % diff and threshold each cycle | ✅ Done |
-| Apr 4 | Modified: requirements.txt, | (see commit message) | ✅ Done |
-| Apr 4 | Modified: .githooks/pre-commit,CLAUDE.md,setup.sh, | (see commit message) | ✅ Done |
-| Apr 9 | Modified: scanner.py, | (see commit message) | ✅ Done |
-| Apr 9 | Modified: main.py,run_bot.sh, | (see commit message) | ✅ Done |
-| Apr 10 | RVOL threshold 1.5×→1.0×; fixed docstring to match (was still showing 2.0×) | 1.5× left only 1 symbol in watchlist all session — zero signal opportunities for 12 days | ✅ Done |
-| Apr 10 | Modified: scanner.py, | (see commit message) | ✅ Done |
-| Apr 11 | Modified: alpaca_service.py,main.py,risk_manager.py,scanner.py,strategy.py, | (see commit message) | ✅ Done |
+| Apr 9 | RVOL threshold 2.0×→1.5× | Broadened candidate pool | ✅ Done |
+| Apr 10 | RVOL threshold 1.5×→1.0×; fixed docstring | 1.5× left only 1 symbol in watchlist — zero signal opportunities for 12 days | ✅ Done |
+| Apr 11 | **Full rebuild: Gap-UP Momentum Scanner** — replaced BB/engulfing with VWAP pullback reclaim, entry only 9:30–10:00 AM ET, 8% equity sizing, VWAP bracket stop, prev_day_high TP, 2% kill switch | Original counter-trend strategy had zero trades in 2 weeks; gap-and-go momentum aligns with bull market conditions | ✅ Done |
+| Apr 11 | Scanner: GAP_MIN_PCT 4%→2% | More gap candidates qualify | ✅ Done |
 
 ---
 
@@ -158,14 +155,14 @@ Runs automatically at **9:00 AM ET** every trading day. Replaces the fixed watch
 - Make sure using Paper Trading keys, not Live keys
 
 ### SIP Data Error (Mac)
-- Add `feed=DataFeed.IEX` to `StockBarsRequest` in `market_data_agent.py`
+- Add `feed=DataFeed.IEX` to `StockBarsRequest` in `alpaca_service.py`
 
 ### Insufficient Bars
-- Increase `days` parameter in `get_bars()` or reduce `SMA_LONG_PERIOD` in `config.py`
+- Increase `days` parameter in bar fetch calls
 
 ### pip not found (Mac)
 - Use `pip3` instead of `pip`
 - Add `--break-system-packages` flag
 
 ### Module not found
-- Run `pip3 install -r requirements.txt --break-system-packages` from the TradingApp folder
+- Run `pip3 install -r requirements.txt --break-system-packages` from the alpaca-bot folder
