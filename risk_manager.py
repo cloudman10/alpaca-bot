@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 RISK_PER_TRADE_PCT = 0.01   # 1% of equity per trade
 REWARD_RATIO = 2             # 1:2 risk-to-reward
-DAILY_LOSS_LIMIT_PCT = 0.03  # 3% daily drawdown kill switch
+DAILY_LOSS_LIMIT_PCT = 0.02  # 2% daily drawdown kill switch (tightened from 3%)
 MAX_SHARES = 2000            # hard cap on position size
 
 

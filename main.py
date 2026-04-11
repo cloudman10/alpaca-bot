@@ -1,13 +1,27 @@
 """
-main.py — Entry point for the Ross Cameron 15m Momentum trading bot.
+main.py — Gap-UP Momentum Scanner (Bot 2).
 
 Daily schedule (Eastern time):
-  9:00 AM  — pre-market gap scanner runs automatically
-  9:20 AM  — dynamic watchlist finalized from gap + RVOL filters
-  9:30 AM  — RSI/BB/Engulfing entry logic activates on dynamic watchlist
-  4:00 PM  — market close; scanner resets for next day
+  9:00 AM  — pre-market gap scanner runs (gap > 2%, RVOL > 1.0×)
+  9:20 AM  — dynamic watchlist finalized (top 5 gap-up candidates)
+  9:30 AM  — entry window opens: VWAP pullback + reclaim signals active
+  10:00 AM — entry window closes (no new positions after first 30 min)
+  4:00 PM  — market close; VWAP stop monitoring ends
 
-Heartbeat loop: scans the watchlist every 15 seconds during market hours.
+Entry logic (all must be met):
+  1. Within first 30 min of session (9:30–10:00 AM ET)
+  2. Previous 15m bar low touched/was at VWAP (pullback occurred)
+  3. Current 15m bar closes above VWAP (bullish reclaim)
+  4. Current bar is bullish (close > open)
+  5. RSI(14) 45–65
+  6. Volume > 1.5× 20-bar average on entry bar
+  7. SPY not making new lows
+
+Exit logic:
+  - Take profit: previous day high (if above entry) OR 4% above entry
+  - Stop loss: VWAP at entry (bracket order static stop)
+  - VWAP monitoring: if price closes below VWAP mid-session, exit immediately
+  - Kill switch: 2% daily loss limit
 """
 
 import os
@@ -23,6 +37,7 @@ from alpaca_service import (
     get_balance,
     get_1m_bars,
     get_15m_bars,
+    get_prev_day_high,
     place_bracket_order,
     close_all_positions,
     cancel_all_orders,
@@ -54,9 +69,11 @@ logger = logging.getLogger(__name__)
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-HEARTBEAT_SEC = 15
-BAR_LIMIT     = 50
-ET            = ZoneInfo("America/New_York")
+HEARTBEAT_SEC    = 15
+BAR_LIMIT        = 50
+POSITION_SIZE_PCT = 0.08   # 8% of equity per position
+MAX_POSITIONS    = 3
+ET               = ZoneInfo("America/New_York")
 
 # ── State ─────────────────────────────────────────────────────────────────────
 
@@ -64,9 +81,8 @@ kill_switch:    DailyKillSwitch | None = None
 is_running:     bool                   = False
 active_symbols: set[str]               = set()
 
-# Scanner state — resets each trading day
-_scanner_ran_date: Date | None = None        # date scanner last ran
-_dynamic_watchlist: list[str]  = list(DEFAULT_WATCHLIST)  # today's watchlist
+_scanner_ran_date:  Date | None = None
+_dynamic_watchlist: list[str]   = list(DEFAULT_WATCHLIST)
 
 
 # ── Time helpers ──────────────────────────────────────────────────────────────
@@ -75,34 +91,34 @@ def _et_now() -> datetime:
     return datetime.now(ET)
 
 
+def _is_weekday() -> bool:
+    return _et_now().weekday() < 5
+
+
 def _in_scanner_window() -> bool:
-    """
-    Returns True between 9:00 AM and 9:29 AM ET.
-    This is when the gap scanner should run to build the day's watchlist.
-    """
+    """9:00–9:29 AM ET — gap scanner window."""
+    now = _et_now()
+    return now.hour == 9 and now.minute < 30
+
+
+def _in_entry_window() -> bool:
+    """9:30–10:00 AM ET — VWAP pullback entry window (first 30 min only)."""
     now = _et_now()
     h, m = now.hour, now.minute
-    return h == 9 and m < 30
+    return (h == 9 and m >= 30) or (h == 10 and m == 0)
 
 
 def _in_trading_window() -> bool:
-    """
-    Returns True between 9:30 AM and 3:55 PM ET (regular market hours).
-    Stops 5 min early to avoid placing orders right at close.
-    """
+    """9:30 AM–3:55 PM ET — position monitoring window."""
     now = _et_now()
     h, m = now.hour, now.minute
-    after_open  = (h == 9 and m >= 30) or (h > 9)
+    after_open   = (h == 9 and m >= 30) or h > 9
     before_close = h < 15 or (h == 15 and m < 55)
     return after_open and before_close
 
 
-def _is_weekday() -> bool:
-    return _et_now().weekday() < 5  # Mon–Fri
-
-
 def _is_active_period() -> bool:
-    """True between 8:55 AM and 4:05 PM ET on weekdays (covers scanner + trading windows)."""
+    """True between 8:55 AM and 4:05 PM ET on weekdays."""
     if not _is_weekday():
         return False
     now = _et_now()
@@ -118,65 +134,51 @@ def _seconds_until_premarket() -> float:
     target = now.replace(hour=8, minute=55, second=0, microsecond=0)
     if now >= target:
         target += timedelta(days=1)
-    while target.weekday() >= 5:   # skip Saturday / Sunday
+    while target.weekday() >= 5:
         target += timedelta(days=1)
     return (target - now).total_seconds()
 
 
-# ── Scanner ───────────────────────────────────────────────────────────────────
+# ── SPY stability filter ──────────────────────────────────────────────────────
 
 def _spy_is_stable() -> bool:
-    """
-    SPY stabilization filter: returns True only if SPY has NOT made a new low
-    in the last 3 x 1-minute bars.
-    Prevents entering a trade into a still-falling market.
-    Returns True (allow entry) on any data error so the filter never hard-blocks.
-    """
+    """Returns True if SPY has NOT made a new low in the last 3 × 1-min bars."""
     try:
         df = get_1m_bars("SPY", 3)
         if len(df) < 3:
-            logger.warning("SPY: not enough 1-min bars for stabilization check — allowing entry")
             return True
-        low_now  = df["low"].iloc[-1]
-        low_1    = df["low"].iloc[-2]
-        low_2    = df["low"].iloc[-3]
-        stable   = low_now >= low_1 and low_now >= low_2
+        low_now = df["low"].iloc[-1]
+        low_1   = df["low"].iloc[-2]
+        low_2   = df["low"].iloc[-3]
+        stable  = low_now >= low_1 and low_now >= low_2
         if not stable:
-            logger.info(
-                "SPY stabilization FAILED: new low detected (%.2f < %.2f or %.2f) — skipping entry",
-                low_now, low_1, low_2,
-            )
+            logger.info("SPY stabilization FAILED — new low detected, skipping entries")
         return stable
     except Exception as e:
-        logger.warning("SPY stabilization check error (%s) — allowing entry", e)
+        logger.warning("SPY check error (%s) — allowing entry", e)
         return True
 
 
+# ── Scanner ───────────────────────────────────────────────────────────────────
+
 def _run_scanner_if_needed():
-    """
-    Runs the gap scanner once per day during the 9:00–9:29 AM ET window.
-    Updates _dynamic_watchlist in place.
-    """
+    """Run gap scanner once per day during 9:00–9:29 AM ET window."""
     global _scanner_ran_date, _dynamic_watchlist
 
     if not _is_weekday():
         return
-
     today = _et_now().date()
-    if _scanner_ran_date == today:
-        return  # already ran today
-
-    if not _in_scanner_window():
+    if _scanner_ran_date == today or not _in_scanner_window():
         return
 
     logger.info("──────────────────────────────────────────────────────")
-    logger.info("PRE-MARKET SCANNER: building today's dynamic watchlist")
+    logger.info("PRE-MARKET SCANNER: gap > 2%%, RVOL > 1.0×")
     logger.info("──────────────────────────────────────────────────────")
 
     try:
         _dynamic_watchlist = run_gap_scanner()
     except Exception as e:
-        logger.error("Scanner failed (%s) — keeping default watchlist: %s", e, DEFAULT_WATCHLIST)
+        logger.error("Scanner failed (%s) — keeping default watchlist", e)
         _dynamic_watchlist = list(DEFAULT_WATCHLIST)
 
     _scanner_ran_date = today
@@ -184,31 +186,78 @@ def _run_scanner_if_needed():
     logger.info("──────────────────────────────────────────────────────")
 
 
+# ── Position exit monitoring (VWAP stop) ─────────────────────────────────────
+
+def _monitor_positions_for_vwap_stop():
+    """
+    Check all open positions: if price closes below current VWAP → exit immediately.
+    Called every heartbeat during trading window.
+    """
+    positions = get_open_positions()
+    if not positions:
+        return
+
+    today = _et_now().date()
+
+    for pos in positions:
+        symbol = pos["symbol"]
+        try:
+            df = get_15m_bars(symbol, BAR_LIMIT)
+            if df.empty:
+                continue
+            df = compute_indicators(df)
+
+            # Filter to today's bars for accurate VWAP
+            import pandas as pd
+            times = pd.to_datetime(df["time"]).dt.tz_localize(
+                "UTC", ambiguous="infer"
+            ).dt.tz_convert(ET).dt.date
+            today_df = df[times == today]
+            if today_df.empty:
+                continue
+
+            current_vwap  = float(today_df["VWAP"].iloc[-1])
+            current_price = float(today_df["close"].iloc[-1])
+
+            logger.info(
+                "[%s] VWAP check: price=%.2f VWAP=%.2f",
+                symbol, current_price, current_vwap,
+            )
+
+            if current_price < current_vwap:
+                logger.info(
+                    "[%s] Price %.2f < VWAP %.2f — VWAP stop triggered, closing all",
+                    symbol, current_price, current_vwap,
+                )
+                cancel_all_orders()
+                close_all_positions()
+                active_symbols.clear()
+                return   # exit after closing — re-check next tick
+
+        except Exception as e:
+            logger.error("[%s] VWAP stop check error: %s", symbol, e)
+
+
 # ── Main scan loop ────────────────────────────────────────────────────────────
 
 def scan():
-    """One full heartbeat tick — runs scanner if needed, then scans watchlist."""
-    global is_running, kill_switch
+    """One heartbeat tick."""
+    global is_running
 
-    # Always try to run the scanner (it self-gates by time + date)
     _run_scanner_if_needed()
 
     if is_running:
-        logger.info("Previous scan still running — skipping this tick.")
         return
 
-    # Only trade during regular market hours
     if not _in_trading_window():
         return
 
     is_running = True
     try:
-        # 1. Check market hours (Alpaca clock confirmation)
         if not is_market_open():
             logger.info("Market is closed — skipping scan.")
             return
 
-        # 2. Fetch current equity and check kill switch
         account = get_balance()
         logger.info(
             "Equity: $%.2f | Cash: $%.2f | Buying Power: $%.2f",
@@ -216,85 +265,94 @@ def scan():
         )
 
         if kill_switch and kill_switch.check(account["equity"]):
-            logger.warning("Kill switch is ACTIVE — no new trades will be placed.")
+            logger.warning("Kill switch ACTIVE — no new trades.")
             return
 
-        # 3. Sync active_symbols with real open positions
+        # ── Monitor existing positions for VWAP-based exit ────────────────
+        _monitor_positions_for_vwap_stop()
+
+        # ── Entry logic: only within first 30 min of session ─────────────
+        if not _in_entry_window():
+            logger.info("Outside entry window (9:30–10:00 AM ET) — monitoring only.")
+            return
+
+        if len(active_symbols) >= MAX_POSITIONS:
+            logger.info("Max positions (%d) reached — no new entries.", MAX_POSITIONS)
+            return
+
         open_positions   = get_open_positions()
         position_symbols = {p["symbol"] for p in open_positions}
 
+        # Sync active_symbols with real positions
         for sym in list(active_symbols):
             if sym not in position_symbols:
                 active_symbols.discard(sym)
                 logger.info("[%s] Position closed — slot freed.", sym)
 
-        # 4. Scan dynamic watchlist
+        spy_stable = _spy_is_stable()
+
         for symbol in _dynamic_watchlist:
             if symbol in active_symbols:
-                logger.info("[%s] Already in position — skipping.", symbol)
                 continue
+            if len(active_symbols) >= MAX_POSITIONS:
+                break
 
             try:
                 df = get_15m_bars(symbol, BAR_LIMIT)
-
                 if len(df) < 30:
                     logger.info("[%s] Not enough bars (%d) — skipping.", symbol, len(df))
                     continue
 
                 df     = compute_indicators(df)
-                signal = detect_signal(symbol, df)
+                signal = detect_signal(symbol, df, spy_stable=spy_stable)
 
                 if not signal:
                     logger.info("[%s] No signal.", symbol)
                     continue
 
-                logger.info("[%s] SIGNAL DETECTED: %s", symbol, signal["reason"])
-                logger.info(
-                    "  Entry: $%.2f | Stop: $%.2f | Target: $%.2f",
-                    signal["entry_price"], signal["stop_loss"], signal["take_profit"],
-                )
+                logger.info("[%s] SIGNAL: %s", symbol, signal["reason"])
 
-                # 5. Size the position
-                try:
-                    pos_size = calc_position_size(
-                        account["equity"], signal["entry_price"], signal["stop_loss"]
-                    )
-                except ValueError as e:
-                    logger.error("[%s] Position sizing failed: %s", symbol, e)
+                # ── Position sizing: 8% of equity ─────────────────────────
+                entry  = signal["entry_price"]
+                equity = account["equity"]
+                alloc  = equity * POSITION_SIZE_PCT
+                qty    = int(alloc / entry)
+
+                if qty < 1:
+                    logger.warning("[%s] Position size rounds to 0 — skip.", symbol)
                     continue
 
-                logger.info(
-                    "  Qty: %s shares | Risk: $%.2f",
-                    pos_size["qty"], pos_size["risk_amount"],
-                )
-
-                # 6. SPY stabilization check — don't buy into a falling market
-                if not _spy_is_stable():
-                    logger.info("[%s] SPY still falling — skipping entry.", symbol)
-                    continue
-
-                # 7. Check buying power
-                order_cost = pos_size["qty"] * signal["entry_price"]
+                order_cost = qty * entry
                 if order_cost > account["buying_power"]:
                     logger.warning(
-                        "[%s] Insufficient buying power (need $%.2f, have $%.2f) — skipping.",
+                        "[%s] Insufficient buying power (need $%.2f, have $%.2f) — skip.",
                         symbol, order_cost, account["buying_power"],
                     )
                     continue
 
-                # 8. Place bracket order
-                side     = "buy" if signal["direction"] == "LONG" else "sell"
+                # ── Take profit: prev_day_high (if above entry) OR 4% ─────
+                prev_high   = get_prev_day_high(symbol)
+                take_profit = entry * 1.04   # default: 4% above entry
+                if prev_high and prev_high > entry * 1.01:
+                    take_profit = min(prev_high, entry * 1.04)
+                    logger.info(
+                        "[%s] TP set to %.2f (prev_day_high=%.2f, 4%%=%.2f)",
+                        symbol, take_profit, prev_high, entry * 1.04,
+                    )
+
+                stop_loss = signal["stop_loss"]   # VWAP at entry time
+
+                logger.info(
+                    "[%s] Entry=%.2f SL=%.2f (VWAP) TP=%.2f qty=%d cost=$%.2f",
+                    symbol, entry, stop_loss, take_profit, qty, order_cost,
+                )
+
                 order_id = place_bracket_order(
-                    symbol,
-                    pos_size["qty"],
-                    side,
-                    signal["entry_price"],
-                    signal["stop_loss"],
-                    signal["take_profit"],
+                    symbol, qty, "buy", entry, stop_loss, take_profit
                 )
 
                 active_symbols.add(symbol)
-                logger.info("[%s] Bracket order placed. ID: %s", symbol, order_id)
+                logger.info("[%s] Order placed. ID: %s", symbol, order_id)
 
             except Exception as e:
                 logger.error("[%s] Error during scan: %s", symbol, e)
@@ -308,7 +366,6 @@ def scan():
 # ── Shutdown ──────────────────────────────────────────────────────────────────
 
 def shutdown(sig, frame):
-    """Graceful shutdown — cancel orders and close positions."""
     sig_name = signal.Signals(sig).name
     logger.info("Received %s — shutting down gracefully...", sig_name)
     try:
@@ -328,14 +385,17 @@ def main():
     signal.signal(signal.SIGTERM, shutdown)
 
     print("═══════════════════════════════════════════════════════")
-    print("   Alpaca Trading Bot — Ross Cameron 15m Momentum       ")
-    print("   + Pre-market Gap Scanner                             ")
+    print("   Gap-UP Momentum Scanner — Bot 2                     ")
+    print("   VWAP Pullback Entry | First 30 Min Only             ")
     print("═══════════════════════════════════════════════════════")
-    print(f"Started at:        {datetime.now(timezone.utc).isoformat()}")
+    print(f"Started at:       {datetime.now(timezone.utc).isoformat()}")
     print(f"Default watchlist: {', '.join(DEFAULT_WATCHLIST)}")
     print(f"Heartbeat:         {HEARTBEAT_SEC}s")
-    print("Scanner window:    9:00–9:29 AM ET (gap > 4%, RVOL > 2×)")
-    print("Trading window:    9:30 AM–3:55 PM ET")
+    print("Scanner window:    9:00–9:29 AM ET (gap > 2%, RVOL > 1.0×)")
+    print("Entry window:      9:30–10:00 AM ET (VWAP reclaim)")
+    print("Position size:     8% of equity | Max 3 positions")
+    print("Stop loss:         VWAP at entry | TP: prev_day_high or +4%")
+    print("Kill switch:       2% daily loss limit")
     print("───────────────────────────────────────────────────────")
 
     account = get_balance()

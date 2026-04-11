@@ -172,3 +172,30 @@ def is_market_open() -> bool:
     """Check if the market is currently open."""
     clock = trading_client.get_clock()
     return clock.is_open
+
+
+def get_prev_day_high(symbol: str) -> float | None:
+    """
+    Fetch the previous trading day's high price for take-profit targeting.
+    Returns None on error or if fewer than 2 daily bars are available.
+    """
+    from datetime import timezone
+    end   = datetime.now(timezone.utc)
+    start = end - timedelta(days=7)
+
+    request = StockBarsRequest(
+        symbol_or_symbols=symbol,
+        timeframe=TimeFrame.Day,
+        start=start,
+        limit=5,
+        feed="iex",
+    )
+    try:
+        bars     = data_client.get_stock_bars(request)
+        bar_list = bars[symbol]
+        if len(bar_list) < 2:
+            return None
+        return float(bar_list[-2].high)   # second-to-last = previous trading day
+    except Exception as e:
+        logger.warning("get_prev_day_high failed for %s: %s", symbol, e)
+        return None

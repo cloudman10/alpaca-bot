@@ -147,6 +147,7 @@ Runs automatically at **9:00 AM ET** every trading day. Replaces the fixed watch
 | Apr 9 | Modified: main.py,run_bot.sh, | (see commit message) | ✅ Done |
 | Apr 10 | RVOL threshold 1.5×→1.0×; fixed docstring to match (was still showing 2.0×) | 1.5× left only 1 symbol in watchlist all session — zero signal opportunities for 12 days | ✅ Done |
 | Apr 10 | Modified: scanner.py, | (see commit message) | ✅ Done |
+| Apr 11 | Modified: alpaca_service.py,main.py,risk_manager.py,scanner.py,strategy.py, | (see commit message) | ✅ Done |
 
 ---
 

@@ -1,125 +1,139 @@
 """
-strategy.py — Ross Cameron 15-minute Momentum signal detection.
+strategy.py — Gap-UP Momentum: VWAP pullback entry within first 30 min.
 
-LONG setup (4 conditions):
-  1. RSI < 25  (deeper oversold threshold, lowered from 30)
-  2. Previous candle touched lower Bollinger Band (low <= lower BB)
-  3. Bullish engulfing pattern
-  4. Volume climax: current bar volume > 2× 20-bar average (capitulation confirmation)
+Entry conditions (all must be met):
+  1. Current bar is within first 30 min of session (9:30–10:00 AM ET) — enforced by caller
+  2. Previous bar's low touched or was at/below VWAP (pullback to VWAP occurred)
+  3. Current bar closes ABOVE VWAP (bullish reclaim)
+  4. Current bar is a bullish candle (close > open)
+  5. RSI(14) between 45–65 (post-gap RSI in a healthy range, not overbought)
+  6. Volume on current bar > 1.5× 20-bar average (buyers confirming the reclaim)
+  7. SPY not making new lows (passed in as spy_stable)
 
-SHORT setup (4 conditions):
-  1. RSI > 70
-  2. Previous candle pierced upper Bollinger Band (high >= upper BB)
-  3. Bearish engulfing pattern
-  4. Volume climax: current bar volume > 2× 20-bar average
-
-Stop-loss:   outer BB of the trigger candle
-Take-profit: VWAP if valid (above entry for LONG / below for SHORT), else 1:2 R:R
+Exit rules (managed in main.py):
+  - Take Profit : previous day high (if above entry) OR 4% above entry
+  - Stop Loss   : VWAP at time of entry (set as bracket stop)
+  - Kill Switch : 2% daily loss limit (DailyKillSwitch in risk_manager.py)
 """
 
 import logging
 import pandas as pd
-from indicators import is_bullish_engulfing, is_bearish_engulfing
-from risk_manager import calc_take_profit
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
-RSI_OVERSOLD       = 25   # lowered from 30 — catches deeper oversold (e.g. TSLA RSI 20)
-RSI_OVERBOUGHT     = 70
-VOLUME_CLIMAX_MULT = 2.0  # current bar volume must be > 2× 20-bar avg
+RSI_MIN = 45    # lower bound — avoid entries when stock is still weak
+RSI_MAX = 65    # upper bound — avoid chasing overbought gap continuation
+VOL_MULT = 1.5  # volume must be > 1.5× 20-bar average on entry candle
+ET = ZoneInfo("America/New_York")
 
 
-def detect_signal(symbol: str, df: pd.DataFrame) -> dict | None:
+def _today_bars(df: pd.DataFrame) -> pd.DataFrame:
+    """Return only bars from today's session (ET date match)."""
+    from datetime import datetime
+    today = datetime.now(ET).date()
+    times = pd.to_datetime(df["time"]).dt.tz_localize("UTC", ambiguous="infer").dt.tz_convert(ET).dt.date
+    return df[times == today].reset_index(drop=True)
+
+
+def detect_signal(
+    symbol: str,
+    df: pd.DataFrame,
+    spy_stable: bool = True,
+) -> dict | None:
     """
-    Detect buy/short signals on a DataFrame with indicator columns.
+    Detect a VWAP-reclaim entry signal on the 15-minute df with indicators.
     Returns a signal dict or None.
+
+    Required columns: RSI_14, VWAP, volume_avg_20, time, open, high, low, close, volume.
     """
     if len(df) < 3:
         return None
 
-    # Check that required indicator columns exist
-    required = ["RSI_14", "BBL_20_2.0", "BBU_20_2.0", "volume_avg_20", "VWAP"]
-    if not all(col in df.columns for col in required):
+    required = ["RSI_14", "VWAP", "volume_avg_20"]
+    if not all(c in df.columns for c in required):
+        logger.debug("[%s] Missing required columns — skipping", symbol)
         return None
 
-    # Drop rows where indicators haven't warmed up
-    df_clean = df.dropna(subset=["RSI_14", "BBL_20_2.0", "BBU_20_2.0", "volume_avg_20"])
-    if len(df_clean) < 2:
+    # ── Filter to today's bars only ───────────────────────────────────────────
+    today = _today_bars(df)
+    if len(today) < 2:
+        logger.info("[%s] Less than 2 intraday bars today — waiting", symbol)
         return None
 
-    # Most recent two candles
-    bar_n  = df_clean.iloc[-1]  # current candle
-    bar_n1 = df_clean.iloc[-2]  # previous candle
+    bar_curr = today.iloc[-1]
+    bar_prev = today.iloc[-2]
 
-    last_rsi    = bar_n["RSI_14"]
-    bb_lower_n1 = bar_n1["BBL_20_2.0"]
-    bb_upper_n1 = bar_n1["BBU_20_2.0"]
-    vol_avg     = bar_n["volume_avg_20"]
-    vwap        = bar_n["VWAP"] if pd.notna(bar_n.get("VWAP")) else None
+    vwap    = bar_curr.get("VWAP")
+    rsi     = bar_curr.get("RSI_14")
+    vol_avg = bar_curr.get("volume_avg_20")
 
-    # Volume climax: current bar volume > 2× 20-bar average
-    volume_climax = (vol_avg > 0) and (bar_n["volume"] > VOLUME_CLIMAX_MULT * vol_avg)
+    if any(pd.isna(x) for x in [vwap, rsi, vol_avg]):
+        logger.debug("[%s] NaN in key indicators — skipping", symbol)
+        return None
 
-    # ── LONG setup ───────────────────────────────────────────────────────
-    long_cond1 = last_rsi < RSI_OVERSOLD
-    long_cond2 = bar_n1["low"] <= bb_lower_n1        # touched lower band
-    long_cond3 = is_bullish_engulfing(bar_n1, bar_n) # bullish engulfing
-    long_cond4 = volume_climax                        # capitulation volume
+    vwap    = float(vwap)
+    rsi     = float(rsi)
+    vol_avg = float(vol_avg)
 
-    if long_cond1 and long_cond2 and long_cond3 and long_cond4:
-        entry       = bar_n["close"]
-        stop_loss   = bb_lower_n1
-        take_profit = calc_take_profit(entry, stop_loss, "LONG", vwap=vwap)
+    # ── Condition 1: SPY market confirmation ──────────────────────────────────
+    if not spy_stable:
+        logger.info("[%s] SPY making new lows — skip entry", symbol)
+        return None
 
-        return {
-            "direction":   "LONG",
-            "symbol":      symbol,
-            "entry_price": entry,
-            "stop_loss":   stop_loss,
-            "take_profit": take_profit,
-            "reason": (
-                f"LONG | RSI={last_rsi:.1f} | "
-                f"LowTouchedBB({bar_n1['low']:.2f}<={bb_lower_n1:.2f}) | "
-                f"BullishEngulfing | "
-                f"VolClimax({bar_n['volume']:.0f}>{VOLUME_CLIMAX_MULT}x{vol_avg:.0f}) | "
-                f"TP=VWAP({vwap:.2f})" if vwap else
-                f"LONG | RSI={last_rsi:.1f} | "
-                f"LowTouchedBB({bar_n1['low']:.2f}<={bb_lower_n1:.2f}) | "
-                f"BullishEngulfing | "
-                f"VolClimax({bar_n['volume']:.0f}>{VOLUME_CLIMAX_MULT}x{vol_avg:.0f}) | "
-                f"TP=1:2RR"
-            ),
-        }
+    # ── Condition 2: RSI 45–65 ────────────────────────────────────────────────
+    if not (RSI_MIN <= rsi <= RSI_MAX):
+        logger.info("[%s] RSI %.1f outside %d–%d range — skip", symbol, rsi, RSI_MIN, RSI_MAX)
+        return None
 
-    # ── SHORT setup ──────────────────────────────────────────────────────
-    short_cond1 = last_rsi > RSI_OVERBOUGHT
-    short_cond2 = bar_n1["high"] >= bb_upper_n1       # pierced upper band
-    short_cond3 = is_bearish_engulfing(bar_n1, bar_n) # bearish engulfing
-    short_cond4 = volume_climax                        # capitulation volume
+    # ── Condition 3: Previous bar touched/went below VWAP (pullback) ──────────
+    if float(bar_prev["low"]) > vwap:
+        logger.info(
+            "[%s] No VWAP pullback: prev low (%.2f) > VWAP (%.2f) — skip",
+            symbol, bar_prev["low"], vwap,
+        )
+        return None
 
-    if short_cond1 and short_cond2 and short_cond3 and short_cond4:
-        entry       = bar_n["close"]
-        stop_loss   = bb_upper_n1
-        take_profit = calc_take_profit(entry, stop_loss, "SHORT", vwap=vwap)
+    # ── Condition 4: Current bar closes above VWAP (reclaim) ─────────────────
+    curr_close = float(bar_curr["close"])
+    if curr_close <= vwap:
+        logger.info("[%s] Price %.2f not above VWAP %.2f — skip", symbol, curr_close, vwap)
+        return None
 
-        return {
-            "direction":   "SHORT",
-            "symbol":      symbol,
-            "entry_price": entry,
-            "stop_loss":   stop_loss,
-            "take_profit": take_profit,
-            "reason": (
-                f"SHORT | RSI={last_rsi:.1f} | "
-                f"HighPiercedBB({bar_n1['high']:.2f}>={bb_upper_n1:.2f}) | "
-                f"BearishEngulfing | "
-                f"VolClimax({bar_n['volume']:.0f}>{VOLUME_CLIMAX_MULT}x{vol_avg:.0f}) | "
-                f"TP=VWAP({vwap:.2f})" if vwap else
-                f"SHORT | RSI={last_rsi:.1f} | "
-                f"HighPiercedBB({bar_n1['high']:.2f}>={bb_upper_n1:.2f}) | "
-                f"BearishEngulfing | "
-                f"VolClimax({bar_n['volume']:.0f}>{VOLUME_CLIMAX_MULT}x{vol_avg:.0f}) | "
-                f"TP=1:2RR"
-            ),
-        }
+    # ── Condition 5: Bullish candle (close > open) ────────────────────────────
+    curr_open = float(bar_curr["open"])
+    if curr_close <= curr_open:
+        logger.info("[%s] Not a bullish candle (close %.2f <= open %.2f) — skip",
+                    symbol, curr_close, curr_open)
+        return None
 
-    return None
+    # ── Condition 6: Volume > 1.5× average ───────────────────────────────────
+    curr_vol = float(bar_curr["volume"])
+    if vol_avg > 0 and curr_vol < vol_avg * VOL_MULT:
+        logger.info(
+            "[%s] Volume %.0f < %.0f (%.1fx avg) — skip",
+            symbol, curr_vol, vol_avg * VOL_MULT, VOL_MULT,
+        )
+        return None
+
+    # ── All conditions met ────────────────────────────────────────────────────
+    entry     = curr_close
+    stop_loss = vwap   # stop below VWAP at time of entry
+
+    logger.info(
+        "[%s] SIGNAL | VWAP reclaim | entry=%.2f VWAP=%.2f | RSI=%.1f | vol=%.0f/%.0f",
+        symbol, entry, vwap, rsi, curr_vol, vol_avg * VOL_MULT,
+    )
+
+    return {
+        "direction":   "LONG",
+        "symbol":      symbol,
+        "entry_price": entry,
+        "stop_loss":   stop_loss,
+        "vwap":        vwap,
+        "reason":      (
+            f"VWAP reclaim | RSI={rsi:.1f} | "
+            f"prev_low={bar_prev['low']:.2f}<=VWAP={vwap:.2f} | "
+            f"vol={curr_vol:.0f}/{vol_avg * VOL_MULT:.0f}"
+        ),
+    }

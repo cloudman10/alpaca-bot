@@ -16,7 +16,7 @@ Gap detection:
 RVOL filter:
   - Fetches 10 days of daily bars
   - RVOL = today_volume / avg_10day_volume
-  - Only keeps stocks with RVOL >= 1.0
+  - Only keeps stocks with RVOL >= 1.0× (relative volume filter)
 
 Result:
   - Returns top 5 symbols sorted by gap % (descending)
@@ -49,8 +49,8 @@ SCAN_UNIVERSE = [
 
 DEFAULT_WATCHLIST = ["SPY", "QQQ", "AAPL", "TSLA", "NVDA", "AMD", "META"]
 
-GAP_MIN_PCT = 0.04   # 4% minimum gap (gainers only)
-RVOL_MIN    = 1.0    # 1.0× relative volume minimum (loosened from 1.5× — thin watchlist causing zero trades)
+GAP_MIN_PCT = 0.02   # 2% minimum gap (lowered from 4% — catches more gap-up candidates)
+RVOL_MIN    = 1.0    # 1.0× relative volume minimum
 MAX_SYMBOLS = 5      # cap dynamic watchlist at 5
 
 
