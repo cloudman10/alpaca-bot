@@ -1,37 +1,41 @@
 #!/bin/bash
-# pre-commit hook: auto-append a row to TRADING_BOTS.md Optimization History
-# Runs on every commit that touches files other than TRADING_BOTS.md itself.
+# pre-commit hook:
+#   1. Auto-append commit row to TRADING_BOTS.md Optimization History
+#   2. Auto-sync Bot 2 config values into ~/TradingApp/docs/strategy_bot2.md
+#   3. Append entry to ~/TradingApp/docs/change_log.md
 
 TRADING_BOTS="TRADING_BOTS.md"
+TRADINGAPP_DOCS="$HOME/TradingApp/docs"
+BOT2_SPEC="${TRADINGAPP_DOCS}/strategy_bot2.md"
+CHANGELOG="${TRADINGAPP_DOCS}/change_log.md"
 
-# Get staged files, excluding TRADING_BOTS.md (avoid self-referential loop)
-STAGED=$(git diff --cached --name-only | grep -v "^${TRADING_BOTS}$" | tr '\n' ', ' | sed 's/, $//')
+# Get staged files (excluding auto-updated files to avoid loops)
+STAGED=$(git diff --cached --name-only \
+  | grep -v "^${TRADING_BOTS}$" \
+  | tr '\n' ', ' | sed 's/, $//')
 
 # Nothing staged besides TRADING_BOTS.md — skip
 if [ -z "$STAGED" ]; then
     exit 0
 fi
 
-# TRADING_BOTS.md must exist
-if [ ! -f "$TRADING_BOTS" ]; then
-    exit 0
-fi
+# ── Step 1: Append to TRADING_BOTS.md Optimization History ────────────────────
 
+if [ -f "$TRADING_BOTS" ]; then
 python3 - "$TRADING_BOTS" "$STAGED" <<'PYEOF'
 import sys
 from datetime import date
 
-filepath     = sys.argv[1]
+filepath      = sys.argv[1]
 changed_files = sys.argv[2]
 
 today    = date.today()
-date_str = today.strftime(f"%b {today.day}")          # e.g. "Apr 4"
+date_str = today.strftime(f"%b {today.day}")
 new_row  = f"| {date_str} | Modified: {changed_files} | (see commit message) | ✅ Done |"
 
 with open(filepath, "r") as f:
     lines = f.readlines()
 
-# Find the last row of the Optimization History table
 last_table_idx = -1
 in_section     = False
 for i, line in enumerate(lines):
@@ -41,7 +45,7 @@ for i, line in enumerate(lines):
         last_table_idx = i
 
 if last_table_idx == -1:
-    print(f"[pre-commit] WARNING: Optimization History table not found in {filepath} — skipping")
+    print(f"[pre-commit] WARNING: Optimization History table not found — skipping")
     sys.exit(0)
 
 lines.insert(last_table_idx + 1, new_row + "\n")
@@ -52,4 +56,103 @@ with open(filepath, "w") as f:
 print(f"[pre-commit] TRADING_BOTS.md updated: {changed_files}")
 PYEOF
 
-git add "$TRADING_BOTS"
+    git add "$TRADING_BOTS"
+fi
+
+# ── Step 2: Auto-sync Bot 2 config into ~/TradingApp/docs/strategy_bot2.md ────
+
+if [ -f "$BOT2_SPEC" ] && [ -f "scanner.py" ] && [ -f "strategy.py" ] && [ -f "main.py" ] && [ -f "risk_manager.py" ]; then
+python3 - "$BOT2_SPEC" "scanner.py" "strategy.py" "main.py" "risk_manager.py" <<'PYEOF'
+import sys, re
+
+spec_path     = sys.argv[1]
+scanner_path  = sys.argv[2]
+strategy_path = sys.argv[3]
+main_path     = sys.argv[4]
+risk_path     = sys.argv[5]
+
+def extract_vals(path):
+    vals = {}
+    with open(path) as f:
+        for line in f:
+            m = re.match(r'^([A-Z_][A-Z0-9_]*)\s*=\s*(.+?)(?:\s*#.*)?$', line.strip())
+            if m:
+                vals[m.group(1)] = m.group(2).strip().rstrip(',')
+    return vals
+
+sv = extract_vals(scanner_path)
+st = extract_vals(strategy_path)
+mn = extract_vals(main_path)
+rk = extract_vals(risk_path)
+
+PARAMS = [
+    ("GAP_MIN_PCT",          sv, "scanner.py"),
+    ("RVOL_MIN",             sv, "scanner.py"),
+    ("MAX_SYMBOLS",          sv, "scanner.py"),
+    ("RSI_MIN",              st, "strategy.py"),
+    ("RSI_MAX",              st, "strategy.py"),
+    ("VOL_MULT",             st, "strategy.py"),
+    ("POSITION_SIZE_PCT",    mn, "main.py"),
+    ("MAX_POSITIONS",        mn, "main.py"),
+    ("HEARTBEAT_SEC",        mn, "main.py"),
+    ("BAR_LIMIT",            mn, "main.py"),
+    ("DAILY_LOSS_LIMIT_PCT", rk, "risk_manager.py"),
+]
+
+rows = ["| Parameter | Value | Source File |", "|-----------|-------|-------------|"]
+for key, source_dict, source_file in PARAMS:
+    val = source_dict.get(key, "—")
+    rows.append(f"| {key} | {val} | {source_file} |")
+
+new_block = "\n".join(rows)
+
+with open(spec_path) as f:
+    content = f.read()
+
+updated = re.sub(
+    r'<!-- CONFIG_START -->.*?<!-- CONFIG_END -->',
+    f'<!-- CONFIG_START -->\n{new_block}\n<!-- CONFIG_END -->',
+    content, flags=re.DOTALL
+)
+
+with open(spec_path, "w") as f:
+    f.write(updated)
+
+print("[pre-commit] ~/TradingApp/docs/strategy_bot2.md config snapshot synced")
+PYEOF
+fi
+
+# ── Step 3: Append to ~/TradingApp/docs/change_log.md ─────────────────────────
+
+if [ -f "$CHANGELOG" ]; then
+python3 - "$CHANGELOG" "$STAGED" <<'PYEOF'
+import sys
+from datetime import date
+
+changelog_path = sys.argv[1]
+changed_files  = sys.argv[2]
+
+today    = date.today()
+date_str = today.strftime("%Y-%m-%d")
+
+entry = (
+    f"\n### {date_str} — alpaca-bot commit\n"
+    f"**Files changed:** `{changed_files}`  \n"
+    f"**Details:** (see git commit message)\n"
+)
+
+with open(changelog_path) as f:
+    content = f.read()
+
+marker = "<!-- AUTO_APPEND_BELOW -->"
+if marker in content:
+    updated = content.replace(marker, marker + entry)
+else:
+    updated = content + entry
+
+with open(changelog_path, "w") as f:
+    f.write(updated)
+
+print("[pre-commit] ~/TradingApp/docs/change_log.md appended")
+PYEOF
+fi
