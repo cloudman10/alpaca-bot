@@ -45,9 +45,9 @@ from alpaca_service import (
     get_open_positions,
 )
 from indicators import compute_indicators
-from strategy import detect_signal
+from strategy import detect_signal, detect_tier2_signal
 from risk_manager import calc_position_size, DailyKillSwitch
-from scanner import run_gap_scanner, DEFAULT_WATCHLIST
+from scanner import run_gap_scanner, DEFAULT_WATCHLIST, get_scan_tier
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -69,10 +69,11 @@ logger = logging.getLogger(__name__)
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-HEARTBEAT_SEC    = 15
-BAR_LIMIT        = 50
-POSITION_SIZE_PCT = 0.08   # 8% of equity per position
-MAX_POSITIONS    = 3
+HEARTBEAT_SEC         = 15
+BAR_LIMIT             = 50
+POSITION_SIZE_PCT     = 0.08   # Tier 1: 8% of equity per position
+POSITION_SIZE_PCT_T2  = 0.04   # Tier 2: 4% of equity (half position)
+MAX_POSITIONS         = 3
 ET               = ZoneInfo("America/New_York")
 
 # ── State ─────────────────────────────────────────────────────────────────────
@@ -80,6 +81,7 @@ ET               = ZoneInfo("America/New_York")
 kill_switch:    DailyKillSwitch | None = None
 is_running:     bool                   = False
 active_symbols: set[str]               = set()
+_symbol_tier:   dict[str, int]         = {}   # tier (1 or 2) per active symbol
 
 _scanner_ran_date:  Date | None = None
 _dynamic_watchlist: list[str]   = list(DEFAULT_WATCHLIST)
@@ -172,7 +174,7 @@ def _run_scanner_if_needed():
         return
 
     logger.info("──────────────────────────────────────────────────────")
-    logger.info("PRE-MARKET SCANNER: gap > 2%%, RVOL > 1.0×")
+    logger.info("PRE-MARKET SCANNER: Tier1 >4%%, Tier2 >2%%, RVOL > 1.0×")
     logger.info("──────────────────────────────────────────────────────")
 
     try:
@@ -182,7 +184,9 @@ def _run_scanner_if_needed():
         _dynamic_watchlist = list(DEFAULT_WATCHLIST)
 
     _scanner_ran_date = today
-    logger.info("Today's watchlist: %s", _dynamic_watchlist)
+    tier = get_scan_tier()
+    tier_label = {1: "Tier 1 (>4%% full pos)", 2: "Tier 2 (>2%% half pos)", 0: "default (no gap)"}
+    logger.info("Today's watchlist: %s  [%s]", _dynamic_watchlist, tier_label.get(tier, "unknown"))
     logger.info("──────────────────────────────────────────────────────")
 
 
@@ -287,9 +291,11 @@ def scan():
         for sym in list(active_symbols):
             if sym not in position_symbols:
                 active_symbols.discard(sym)
+                _symbol_tier.pop(sym, None)
                 logger.info("[%s] Position closed — slot freed.", sym)
 
-        spy_stable = _spy_is_stable()
+        spy_stable   = _spy_is_stable()
+        current_tier = get_scan_tier()
 
         for symbol in _dynamic_watchlist:
             if symbol in active_symbols:
@@ -303,8 +309,15 @@ def scan():
                     logger.info("[%s] Not enough bars (%d) — skipping.", symbol, len(df))
                     continue
 
-                df     = compute_indicators(df)
-                signal = detect_signal(symbol, df, spy_stable=spy_stable)
+                df = compute_indicators(df)
+
+                # ── Choose entry strategy based on tier ───────────────────
+                if current_tier == 2:
+                    # Tier 2: 15-min opening high breakout, no VWAP required
+                    signal = detect_tier2_signal(symbol, df, spy_stable=spy_stable)
+                else:
+                    # Tier 1 or default: VWAP pullback entry
+                    signal = detect_signal(symbol, df, spy_stable=spy_stable)
 
                 if not signal:
                     logger.info("[%s] No signal.", symbol)
@@ -312,11 +325,18 @@ def scan():
 
                 logger.info("[%s] SIGNAL: %s", symbol, signal["reason"])
 
-                # ── Position sizing: 8% of equity ─────────────────────────
-                entry  = signal["entry_price"]
-                equity = account["equity"]
-                alloc  = equity * POSITION_SIZE_PCT
-                qty    = int(alloc / entry)
+                # ── Position sizing: 8% (Tier 1) or 4% (Tier 2) ──────────
+                entry     = signal["entry_price"]
+                equity    = account["equity"]
+                size_pct  = POSITION_SIZE_PCT_T2 if current_tier == 2 else POSITION_SIZE_PCT
+                alloc     = equity * size_pct
+                qty       = int(alloc / entry)
+
+                logger.info(
+                    "[%s] Tier %d position size: %.0f%% of equity ($%.2f → %d shares)",
+                    symbol, current_tier if current_tier in (1, 2) else 1,
+                    size_pct * 100, alloc, qty,
+                )
 
                 if qty < 1:
                     logger.warning("[%s] Position size rounds to 0 — skip.", symbol)
@@ -352,6 +372,7 @@ def scan():
                 )
 
                 active_symbols.add(symbol)
+                _symbol_tier[symbol] = current_tier
                 logger.info("[%s] Order placed. ID: %s", symbol, order_id)
 
             except Exception as e:
@@ -386,16 +407,18 @@ def main():
 
     print("═══════════════════════════════════════════════════════")
     print("   Gap-UP Momentum Scanner — Bot 2                     ")
-    print("   VWAP Pullback Entry | First 30 Min Only             ")
+    print("   Tiered Gap System | Tier1 VWAP + Tier2 ORB          ")
     print("═══════════════════════════════════════════════════════")
     print(f"Started at:       {datetime.now(timezone.utc).isoformat()}")
     print(f"Default watchlist: {', '.join(DEFAULT_WATCHLIST)}")
     print(f"Heartbeat:         {HEARTBEAT_SEC}s")
-    print("Scanner window:    9:00–9:29 AM ET (gap > 2%, RVOL > 1.0×)")
-    print("Entry window:      9:30–10:00 AM ET (VWAP reclaim)")
-    print("Position size:     8% of equity | Max 3 positions")
-    print("Stop loss:         VWAP at entry | TP: prev_day_high or +4%")
+    print("Scanner window:    9:00–9:29 AM ET (Tier1 >4%, Tier2 >2%, RVOL > 1.0×)")
+    print("Entry window:      9:30–10:00 AM ET")
+    print("  Tier 1 (>4%):   VWAP pullback entry | 8% of equity")
+    print("  Tier 2 (>2%):   15-min high breakout | 4% of equity (half pos)")
+    print("Stop loss:         VWAP at entry (T1) / opening low (T2) | TP: prev_day_high or +4%")
     print("Kill switch:       2% daily loss limit")
+    print("Thresholds optimized: 10D High added, 2% Gap fallback active")
     print("───────────────────────────────────────────────────────")
 
     account = get_balance()

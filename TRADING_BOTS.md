@@ -146,6 +146,7 @@ Two autonomous trading bots running via Alpaca Markets paper trading accounts.
 | Apr 11 | **Full rebuild: Gap-UP Momentum Scanner** — replaced BB/engulfing with VWAP pullback reclaim, entry only 9:30–10:00 AM ET, 8% equity sizing, VWAP bracket stop, prev_day_high TP, 2% kill switch | Original counter-trend strategy had zero trades in 2 weeks; gap-and-go momentum aligns with bull market conditions | ✅ Done |
 | Apr 11 | Scanner: GAP_MIN_PCT 4%→2% | More gap candidates qualify | ✅ Done |
 | Apr 11 | Modified: .githooks/pre-commit, | (see commit message) | ✅ Done |
+| Apr 12 | Modified: main.py,scanner.py,strategy.py, | (see commit message) | ✅ Done |
 
 ---
 

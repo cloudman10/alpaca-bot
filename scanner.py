@@ -1,26 +1,19 @@
 """
-scanner.py — Pre-market gap scanner for Bot 2 (Ross Cameron 15m Momentum).
+scanner.py — Pre-market gap scanner for Bot 2 (Gap-UP Momentum).
 
 Daily timeline (all times Eastern):
   9:00 AM  — fetch pre-market prices, calculate gaps vs previous close
-  9:10 AM  — calculate RVOL for gap candidates
+  9:10 AM  — calculate RVOL and apply quality filters
   9:20 AM  — finalize dynamic watchlist (top 5)
-  9:30 AM  — hand off to main.py for RSI/BB/Engulfing entry logic
+  9:30 AM  — hand off to main.py for entry logic
 
-Gap detection:
-  - Scans a broad volatile universe (no ScreenerClient required)
-  - Gap % = (latest_price - prev_close) / prev_close
-  - Pre-market price: latest 1-min bar available via IEX (may be limited pre-9:30)
-  - Fallback: today's open vs prev_close if pre-market bars unavailable
+Tiered gap system:
+  Tier 1: Gap > 4%  → full position (8% of equity), VWAP pullback entry
+  Tier 2: Gap > 2%  → half position (4% of equity), 15-min high breakout entry
+  Both tiers require: RVOL > 1.0×, Market Cap > $1B, pre-market volume > 50k
+  Fallback (no gaps): default watchlist, no gap entry attempted
 
-RVOL filter:
-  - Fetches 10 days of daily bars
-  - RVOL = today_volume / avg_10day_volume
-  - Only keeps stocks with RVOL >= 1.0× (relative volume filter)
-
-Result:
-  - Returns top 5 symbols sorted by gap % (descending)
-  - Falls back to DEFAULT_WATCHLIST if no candidates pass filters
+Use get_scan_tier() in main.py to check which tier fired after scanner runs.
 """
 
 import logging
@@ -49,9 +42,35 @@ SCAN_UNIVERSE = [
 
 DEFAULT_WATCHLIST = ["SPY", "QQQ", "AAPL", "TSLA", "NVDA", "AMD", "META"]
 
-GAP_MIN_PCT = 0.02   # 2% minimum gap (lowered from 4% — catches more gap-up candidates)
-RVOL_MIN    = 1.0    # 1.0× relative volume minimum
-MAX_SYMBOLS = 5      # cap dynamic watchlist at 5
+# Tiered gap thresholds
+TIER1_GAP_PCT     = 0.04    # Tier 1: full position (8% of equity)
+TIER2_GAP_PCT     = 0.02    # Tier 2 fallback: half position (4% of equity)
+PREMARKET_VOL_MIN = 50_000  # minimum pre-market volume (both tiers)
+RVOL_MIN          = 1.0     # 1.0× relative volume minimum (both tiers)
+MAX_SYMBOLS       = 5       # cap dynamic watchlist at 5
+
+# Market cap > $1B filter (static allow-list from SCAN_UNIVERSE)
+# Excludes BYND (~$150M), SPCE (<$100M) which are too small
+LARGE_CAP_UNIVERSE = {
+    "AAPL", "TSLA", "NVDA", "AMD", "META", "AMZN", "MSFT", "GOOGL", "SPY", "QQQ",
+    "SMCI", "MSTR", "COIN", "HOOD", "PLTR", "RIVN", "SOFI", "UPST", "SNAP",
+    "RBLX", "SHOP", "SQ", "PYPL", "ROKU", "UBER", "DKNG", "PENN",
+    "GME", "AMC", "CVNA",
+}
+
+# ── Module-level tier state ───────────────────────────────────────────────────
+
+_scan_tier: int = 0   # 0=default, 1=tier1 (>4%), 2=tier2 (>2%)
+
+
+def get_scan_tier() -> int:
+    """Return the tier detected by the most recent scan.
+
+    0 = default watchlist (no gap candidates)
+    1 = Tier 1 (gap > 4%) — full position, VWAP entry
+    2 = Tier 2 (gap > 2%) — half position, 15-min high breakout entry
+    """
+    return _scan_tier
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
@@ -106,6 +125,36 @@ def _get_latest_intraday_price(symbol: str) -> float | None:
             df = df.xs(symbol, level="symbol")
 
         return float(df["close"].iloc[-1]) if not df.empty else None
+    except Exception:
+        return None
+
+
+def _get_premarket_volume(symbol: str) -> float | None:
+    """
+    Get total pre-market volume from 4:00 AM to now (or 9:30 AM ET) today.
+    Best-effort — returns None if data unavailable (IEX may not cover pre-market).
+    """
+    end   = datetime.now(timezone.utc)
+    start = end - timedelta(hours=6)   # approx 4 AM ET coverage
+
+    req = StockBarsRequest(
+        symbol_or_symbols=symbol,
+        timeframe=TimeFrame(amount=1, unit=TimeFrameUnit.Minute),
+        start=start,
+        end=end,
+        feed=DataFeed.IEX,
+    )
+    try:
+        bars = data_client.get_stock_bars(req)
+        df   = bars.df
+
+        if df.empty:
+            return None
+
+        if isinstance(df.index, pd.MultiIndex):
+            df = df.xs(symbol, level="symbol")
+
+        return float(df["volume"].sum()) if not df.empty else None
     except Exception:
         return None
 
@@ -171,37 +220,23 @@ def calculate_rvol(symbol: str) -> float | None:
         return None
 
 
-def run_gap_scanner(
-    gap_min: float = GAP_MIN_PCT,
+def _find_candidates(
+    gap_min: float,
     rvol_min: float = RVOL_MIN,
     max_symbols: int = MAX_SYMBOLS,
 ) -> list[str]:
     """
-    Full pre-market gap scan pipeline.
-
-    Stage 1 — Gap filter (9:00 AM ET):
-      Scan SCAN_UNIVERSE, keep gainers with gap >= gap_min (default 4%).
-
-    Stage 2 — RVOL filter (9:10 AM ET):
-      For each gap candidate, calculate RVOL. Keep RVOL >= rvol_min (default 2×).
-      If ALL candidates fail RVOL, fall back to gap-only list.
-
-    Stage 3 — Finalize (9:20 AM ET):
-      Sort by gap % descending. Return top max_symbols (default 5).
-      If no candidates at all, return DEFAULT_WATCHLIST.
-
-    Returns:
-      list[str] — symbol list for today's trading session
+    Internal: scan LARGE_CAP_UNIVERSE for gap >= gap_min, apply RVOL and
+    pre-market volume filters. Returns sorted symbol list (empty if none pass).
     """
-    logger.info(
-        "=== Gap Scanner: scanning %d symbols (gap > %.0f%%, RVOL > %.1fx) ===",
-        len(SCAN_UNIVERSE), gap_min * 100, rvol_min,
-    )
-
-    # ── Stage 1: Gap filter ──────────────────────────────────────────────────
+    # Stage 1: gap filter (large-cap universe only)
     gap_candidates: list[tuple[str, float]] = []
 
     for symbol in SCAN_UNIVERSE:
+        if symbol not in LARGE_CAP_UNIVERSE:
+            logger.debug("[%s] Not in large-cap universe — skip", symbol)
+            continue
+
         gap = calculate_gap(symbol)
         if gap is None:
             continue
@@ -209,21 +244,17 @@ def run_gap_scanner(
             gap_candidates.append((symbol, gap))
             logger.info("[%s] GAP +%.1f%% ✓", symbol, gap * 100)
         else:
-            logger.debug("[%s] gap %.1f%% below threshold", symbol, gap * 100)
+            logger.debug("[%s] gap %.1f%% below %.0f%% threshold", symbol, gap * 100, gap_min * 100)
 
     if not gap_candidates:
-        logger.warning(
-            "No symbols gapping > %.0f%% — falling back to default watchlist: %s",
-            gap_min * 100, DEFAULT_WATCHLIST,
-        )
-        return DEFAULT_WATCHLIST
+        return []
 
     logger.info(
         "Stage 1 complete: %d gap candidates — %s",
         len(gap_candidates), [s for s, _ in gap_candidates],
     )
 
-    # ── Stage 2: RVOL filter ─────────────────────────────────────────────────
+    # Stage 2: RVOL filter
     rvol_candidates: list[tuple[str, float, float]] = []
 
     for symbol, gap in gap_candidates:
@@ -238,17 +269,80 @@ def run_gap_scanner(
             logger.info("[%s] RVOL %.1fx below %.1fx threshold", symbol, rvol, rvol_min)
 
     if not rvol_candidates:
-        logger.warning(
-            "No candidates passed RVOL filter — using gap-only list (RVOL requirement relaxed)",
-        )
+        logger.warning("No candidates passed RVOL filter — using gap-only list")
         rvol_candidates = [(s, g, 0.0) for s, g in gap_candidates]
 
-    # ── Stage 3: Finalize ────────────────────────────────────────────────────
-    rvol_candidates.sort(key=lambda x: x[1], reverse=True)
-    watchlist = [s for s, _, _ in rvol_candidates[:max_symbols]]
+    # Stage 3: Pre-market volume filter (best-effort — skip if data unavailable)
+    vol_filtered: list[tuple[str, float, float]] = []
+    for symbol, gap, rvol in rvol_candidates:
+        pm_vol = _get_premarket_volume(symbol)
+        if pm_vol is None:
+            # IEX may not have pre-market data — allow through
+            logger.debug("[%s] Pre-market volume unavailable — allowing through", symbol)
+            vol_filtered.append((symbol, gap, rvol))
+        elif pm_vol >= PREMARKET_VOL_MIN:
+            logger.info("[%s] Pre-market vol %.0f ✓", symbol, pm_vol)
+            vol_filtered.append((symbol, gap, rvol))
+        else:
+            logger.info("[%s] Pre-market vol %.0f < %d threshold — skip", symbol, pm_vol, PREMARKET_VOL_MIN)
+
+    if not vol_filtered:
+        logger.warning("No candidates passed pre-market volume filter — relaxing")
+        vol_filtered = rvol_candidates
+
+    # Stage 4: Finalize — sort by gap, return top N
+    vol_filtered.sort(key=lambda x: x[1], reverse=True)
+    return [s for s, _, _ in vol_filtered[:max_symbols]]
+
+
+def run_gap_scanner(
+    rvol_min: float = RVOL_MIN,
+    max_symbols: int = MAX_SYMBOLS,
+) -> list[str]:
+    """
+    Full pre-market gap scan pipeline with tiered fallback.
+
+    Tier 1 (gap > 4%): Full position size (8% of equity), VWAP pullback entry.
+    Tier 2 (gap > 2%): Half position size (4% of equity), 15-min high breakout entry.
+    Default: no gap candidates — return DEFAULT_WATCHLIST, no gap entry attempted.
+
+    Call get_scan_tier() after this returns to determine which tier fired.
+    """
+    global _scan_tier
 
     logger.info(
-        "=== Dynamic watchlist finalized (%d symbols): %s ===",
-        len(watchlist), watchlist,
+        "=== Gap Scanner: scanning %d symbols (Tier1 >%.0f%%, Tier2 >%.0f%%, RVOL > %.1fx) ===",
+        len(SCAN_UNIVERSE), TIER1_GAP_PCT * 100, TIER2_GAP_PCT * 100, rvol_min,
     )
-    return watchlist
+
+    # ── Try Tier 1 (gap > 4%) ────────────────────────────────────────────────
+    tier1 = _find_candidates(TIER1_GAP_PCT, rvol_min, max_symbols)
+    if tier1:
+        _scan_tier = 1
+        logger.info(
+            "=== Tier 1 gap detected (>4%%): %d symbols — full position (8%% equity), VWAP entry ===",
+            len(tier1),
+        )
+        logger.info("=== Dynamic watchlist finalized (%d symbols): %s ===", len(tier1), tier1)
+        return tier1
+
+    logger.info("No Tier 1 candidates (>4%%) — trying Tier 2 fallback (>2%%)")
+
+    # ── Try Tier 2 fallback (gap > 2%) ───────────────────────────────────────
+    tier2 = _find_candidates(TIER2_GAP_PCT, rvol_min, max_symbols)
+    if tier2:
+        _scan_tier = 2
+        logger.info(
+            "=== Tier 2 gap detected (>2%%): %d symbols — HALF position (4%% equity), 15-min high breakout entry ===",
+            len(tier2),
+        )
+        logger.info("=== Dynamic watchlist finalized (%d symbols): %s ===", len(tier2), tier2)
+        return tier2
+
+    # ── No candidates — default watchlist ────────────────────────────────────
+    _scan_tier = 0
+    logger.warning(
+        "No gap candidates (Tier1 or Tier2) — falling back to default watchlist: %s",
+        DEFAULT_WATCHLIST,
+    )
+    return DEFAULT_WATCHLIST

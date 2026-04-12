@@ -1,7 +1,7 @@
 """
-strategy.py — Gap-UP Momentum: VWAP pullback entry within first 30 min.
+strategy.py — Gap-UP Momentum: VWAP pullback (Tier 1) and 15-min high breakout (Tier 2).
 
-Entry conditions (all must be met):
+Tier 1 entry (VWAP pullback — all must be met):
   1. Current bar is within first 30 min of session (9:30–10:00 AM ET) — enforced by caller
   2. Previous bar's low touched or was at/below VWAP (pullback to VWAP occurred)
   3. Current bar closes ABOVE VWAP (bullish reclaim)
@@ -10,9 +10,16 @@ Entry conditions (all must be met):
   6. Volume on current bar > 1.5× 20-bar average (buyers confirming the reclaim)
   7. SPY not making new lows (passed in as spy_stable)
 
+Tier 2 entry (15-min opening high breakout — all must be met):
+  1. Current bar is within first 30 min of session — enforced by caller
+  2. Price breaks above the high of the first 15-min bar (opening range high)
+  3. Current bar is a bullish candle (close > open)
+  4. SPY not making new lows (passed in as spy_stable)
+  Stop loss: low of the opening 15-min bar
+
 Exit rules (managed in main.py):
   - Take Profit : previous day high (if above entry) OR 4% above entry
-  - Stop Loss   : VWAP at time of entry (set as bracket stop)
+  - Stop Loss   : VWAP at entry (Tier 1) / opening bar low (Tier 2)
   - Kill Switch : 2% daily loss limit (DailyKillSwitch in risk_manager.py)
 """
 
@@ -131,9 +138,85 @@ def detect_signal(
         "entry_price": entry,
         "stop_loss":   stop_loss,
         "vwap":        vwap,
+        "tier":        1,
         "reason":      (
-            f"VWAP reclaim | RSI={rsi:.1f} | "
+            f"Tier 1 gap detected (>4%%) | VWAP reclaim | RSI={rsi:.1f} | "
             f"prev_low={bar_prev['low']:.2f}<=VWAP={vwap:.2f} | "
             f"vol={curr_vol:.0f}/{vol_avg * VOL_MULT:.0f}"
+        ),
+    }
+
+
+def detect_tier2_signal(
+    symbol: str,
+    df: pd.DataFrame,
+    spy_stable: bool = True,
+) -> dict | None:
+    """
+    Detect a Tier 2 entry: 15-minute opening range high breakout.
+    No VWAP pullback required — enters on break of first 15-min bar's high.
+
+    Conditions:
+      1. SPY not making new lows
+      2. Price (current close) > high of first 15-min bar (opening range high)
+      3. Current bar is bullish (close > open)
+
+    Stop loss: low of the first 15-min bar (opening range low).
+    """
+    if len(df) < 2:
+        return None
+
+    # ── Filter to today's bars only ───────────────────────────────────────────
+    today = _today_bars(df)
+    if len(today) < 2:
+        logger.info("[%s] Tier 2: less than 2 intraday bars today — waiting", symbol)
+        return None
+
+    # ── Condition 1: SPY market confirmation ──────────────────────────────────
+    if not spy_stable:
+        logger.info("[%s] SPY making new lows — skip Tier 2 entry", symbol)
+        return None
+
+    opening_bar  = today.iloc[0]   # first 15-min bar: 9:30–9:45 AM ET
+    opening_high = float(opening_bar["high"])
+    opening_low  = float(opening_bar["low"])
+
+    bar_curr   = today.iloc[-1]
+    curr_close = float(bar_curr["close"])
+    curr_open  = float(bar_curr["open"])
+
+    # ── Condition 2: price breaks above opening range high ────────────────────
+    if curr_close <= opening_high:
+        logger.info(
+            "[%s] Tier 2: price %.2f not above opening high %.2f — skip",
+            symbol, curr_close, opening_high,
+        )
+        return None
+
+    # ── Condition 3: bullish candle ───────────────────────────────────────────
+    if curr_close <= curr_open:
+        logger.info(
+            "[%s] Tier 2: not a bullish candle (close %.2f <= open %.2f) — skip",
+            symbol, curr_close, curr_open,
+        )
+        return None
+
+    stop_loss = opening_low   # stop below opening range low
+
+    logger.info(
+        "[%s] TIER 2 SIGNAL | 15-min high breakout | entry=%.2f opening_high=%.2f stop=%.2f",
+        symbol, curr_close, opening_high, stop_loss,
+    )
+
+    return {
+        "direction":   "LONG",
+        "symbol":      symbol,
+        "entry_price": curr_close,
+        "stop_loss":   stop_loss,
+        "tier":        2,
+        "reason":      (
+            f"Tier 2 gap detected (>2%%) | 15-min high breakout | "
+            f"entry={curr_close:.2f} > opening_high={opening_high:.2f} | "
+            f"stop={stop_loss:.2f} (opening_low)"
         ),
     }
