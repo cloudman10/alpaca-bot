@@ -39,7 +39,8 @@ def _today_bars(df: pd.DataFrame) -> pd.DataFrame:
     """Return only bars from today's session (ET date match)."""
     from datetime import datetime
     today = datetime.now(ET).date()
-    times = pd.to_datetime(df["time"]).dt.tz_localize("UTC", ambiguous="infer").dt.tz_convert(ET).dt.date
+    _t = pd.to_datetime(df["time"])
+    times = (_t.dt.tz_localize("UTC") if _t.dt.tz is None else _t.dt.tz_convert("UTC")).dt.tz_convert(ET).dt.date
     return df[times == today].reset_index(drop=True)
 
 

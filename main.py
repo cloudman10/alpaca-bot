@@ -218,9 +218,8 @@ def _monitor_positions_for_vwap_stop():
 
             # Filter to today's bars for accurate VWAP
             import pandas as pd
-            times = pd.to_datetime(df["time"]).dt.tz_localize(
-                "UTC", ambiguous="infer"
-            ).dt.tz_convert(ET).dt.date
+            _t = pd.to_datetime(df["time"])
+            times = (_t.dt.tz_localize("UTC") if _t.dt.tz is None else _t.dt.tz_convert("UTC")).dt.tz_convert(ET).dt.date
             today_df = df[times == today]
             if today_df.empty:
                 continue
