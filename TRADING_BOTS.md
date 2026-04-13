@@ -147,6 +147,7 @@ Two autonomous trading bots running via Alpaca Markets paper trading accounts.
 | Apr 11 | Scanner: GAP_MIN_PCT 4%→2% | More gap candidates qualify | ✅ Done |
 | Apr 11 | Modified: .githooks/pre-commit, | (see commit message) | ✅ Done |
 | Apr 12 | Modified: main.py,scanner.py,strategy.py, | (see commit message) | ✅ Done |
+| Apr 13 | Modified: main.py, | (see commit message) | ✅ Done |
 
 ---
 

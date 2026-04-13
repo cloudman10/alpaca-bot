@@ -31,7 +31,8 @@ import time
 import logging
 from logging.handlers import TimedRotatingFileHandler
 from datetime import date as Date, datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
+from pathlib import Path
+import pytz
 
 from alpaca_service import (
     get_balance,
@@ -74,7 +75,7 @@ BAR_LIMIT             = 50
 POSITION_SIZE_PCT     = 0.08   # Tier 1: 8% of equity per position
 POSITION_SIZE_PCT_T2  = 0.04   # Tier 2: 4% of equity (half position)
 MAX_POSITIONS         = 3
-ET               = ZoneInfo("America/New_York")
+ET               = pytz.timezone("America/New_York")
 
 # ── State ─────────────────────────────────────────────────────────────────────
 
@@ -131,14 +132,18 @@ def _is_active_period() -> bool:
 
 
 def _seconds_until_premarket() -> float:
-    """Seconds until 8:55 AM ET on the next trading weekday."""
-    now    = _et_now()
-    target = now.replace(hour=8, minute=55, second=0, microsecond=0)
+    """Seconds until 8:55 AM ET on the next trading weekday (DST-safe via pytz.localize)."""
+    now = _et_now()
+
+    def _target(d) -> datetime:
+        return ET.localize(datetime(d.year, d.month, d.day, 8, 55, 0))
+
+    target = _target(now.date())
     if now >= target:
-        target += timedelta(days=1)
+        target = _target(now.date() + timedelta(days=1))
     while target.weekday() >= 5:
-        target += timedelta(days=1)
-    return (target - now).total_seconds()
+        target = _target(target.date() + timedelta(days=1))
+    return max(0.0, (target - now).total_seconds())
 
 
 # ── SPY stability filter ──────────────────────────────────────────────────────
@@ -402,6 +407,9 @@ def shutdown(sig, frame):
 def main():
     global kill_switch
 
+    # Write PID so healthcheck can detect this process regardless of how it was launched.
+    Path("logs/bot2.pid").write_text(str(os.getpid()))
+
     signal.signal(signal.SIGINT,  shutdown)
     signal.signal(signal.SIGTERM, shutdown)
 
@@ -437,7 +445,13 @@ def main():
                 "Outside market hours — sleeping %.1f hours until pre-market (8:55 AM ET).",
                 secs / 3600,
             )
-            time.sleep(secs)
+            # Sleep in 60-second chunks: re-checks timezone every minute so DST
+            # changes and manual restarts don't cause the bot to over-sleep.
+            slept = 0.0
+            while slept < secs and not _is_active_period():
+                chunk = min(60.0, secs - slept)
+                time.sleep(chunk)
+                slept += chunk
             continue
         time.sleep(HEARTBEAT_SEC)
         scan()
