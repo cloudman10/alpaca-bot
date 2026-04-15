@@ -156,3 +156,68 @@ with open(changelog_path, "w") as f:
 print("[pre-commit] ~/TradingApp/docs/change_log.md appended")
 PYEOF
 fi
+
+# ── Step 4: Mirror same row into ~/TradingApp/TRADING_BOTS.md ─────────────────
+# Keeps the master TRADING_BOTS.md in trading-bot repo in sync with every
+# Bot 2 commit — no more manual cross-repo updates needed.
+
+TRADINGAPP_TB="$HOME/TradingApp/TRADING_BOTS.md"
+
+if [ -f "$TRADINGAPP_TB" ]; then
+python3 - "$TRADINGAPP_TB" "$STAGED" <<'PYEOF'
+import sys
+from datetime import date
+
+filepath      = sys.argv[1]
+changed_files = sys.argv[2]
+
+today    = date.today()
+date_str = today.strftime(f"%b {today.day}")
+new_row  = f"| {date_str} | Bot 2 — Modified: {changed_files} | (see alpaca-bot commit) | ✅ Done |"
+
+with open(filepath, "r") as f:
+    lines = f.readlines()
+
+last_table_idx = -1
+in_section     = False
+for i, line in enumerate(lines):
+    if "## Optimization History" in line:
+        in_section = True
+    if in_section and line.strip().startswith("|"):
+        last_table_idx = i
+
+if last_table_idx == -1:
+    print("[pre-commit] WARNING: Optimization History table not found in TradingApp/TRADING_BOTS.md — skipping")
+    sys.exit(0)
+
+lines.insert(last_table_idx + 1, new_row + "\n")
+
+with open(filepath, "w") as f:
+    f.writelines(lines)
+
+print(f"[pre-commit] ~/TradingApp/TRADING_BOTS.md mirrored: {changed_files}")
+PYEOF
+fi
+
+# ── Step 5: Commit and push ~/TradingApp (trading-bot repo) ───────────────────
+# Commits only TRADING_BOTS.md in trading-bot — the trading-bot pre-commit hook
+# exits early when only TRADING_BOTS.md is staged (it's in the exclusion list).
+
+TRADINGAPP_DIR="$HOME/TradingApp"
+
+if [ -f "$TRADINGAPP_TB" ]; then
+    cd "$TRADINGAPP_DIR" || exit 0
+
+    # Only proceed if TRADING_BOTS.md has uncommitted changes
+    if git diff --quiet TRADING_BOTS.md && git diff --cached --quiet TRADING_BOTS.md; then
+        echo "[pre-commit] ~/TradingApp/TRADING_BOTS.md unchanged — skipping trading-bot commit"
+        cd - > /dev/null
+    else
+        git add TRADING_BOTS.md
+        git commit -m "sync: Bot 2 TRADING_BOTS.md update ($(date '+%b %-d'))" \
+            2>&1 | sed 's/^/[pre-commit] trading-bot: /'
+        git push origin master 2>&1 | sed 's/^/[pre-commit] trading-bot push: /'
+        echo "[pre-commit] ~/TradingApp TRADING_BOTS.md committed and pushed"
+        cd - > /dev/null
+    fi
+fi

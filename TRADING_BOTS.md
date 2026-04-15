@@ -151,6 +151,7 @@ Two autonomous trading bots running via Alpaca Markets paper trading accounts.
 | Apr 13 | Modified: main.py,strategy.py, | (see commit message) | ✅ Done |
 | Apr 16 | SPY new-lows check: 1 tick → 3 consecutive ticks before blocking entry (main.py _spy_is_stable) | Single SPY dip at open blocked HOOD +19%, SNAP +17% on Apr 14-15 — brief open weakness doesn't mean sustained downtrend | ✅ Done |
 | Apr 16 | Modified: main.py, | (see commit message) | ✅ Done |
+| Apr 16 | Modified: .githooks/pre-commit, | (see commit message) | ✅ Done |
 
 ---
 
