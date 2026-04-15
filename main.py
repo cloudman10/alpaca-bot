@@ -147,20 +147,37 @@ def _seconds_until_premarket() -> float:
 
 
 # ── SPY stability filter ──────────────────────────────────────────────────────
+# Require 3 consecutive new-low detections before blocking entry.
+# A single SPY dip at the open (common on gap-up days) no longer blocks;
+# only a sustained 3-tick downtrend does.
+_spy_new_low_streak: int = 0
+SPY_NEW_LOW_THRESHOLD = 3   # consecutive new-low ticks required to block
 
 def _spy_is_stable() -> bool:
-    """Returns True if SPY has NOT made a new low in the last 3 × 1-min bars."""
+    """Returns True unless SPY has made new lows on 3 consecutive scan ticks."""
+    global _spy_new_low_streak
     try:
         df = get_1m_bars("SPY", 3)
         if len(df) < 3:
+            _spy_new_low_streak = 0
             return True
         low_now = df["low"].iloc[-1]
         low_1   = df["low"].iloc[-2]
         low_2   = df["low"].iloc[-3]
-        stable  = low_now >= low_1 and low_now >= low_2
-        if not stable:
-            logger.info("SPY stabilization FAILED — new low detected, skipping entries")
-        return stable
+        is_new_low = low_now < low_1 or low_now < low_2
+        if is_new_low:
+            _spy_new_low_streak += 1
+            logger.info(
+                "SPY new low detected (streak %d/%d) — %s",
+                _spy_new_low_streak, SPY_NEW_LOW_THRESHOLD,
+                "blocking entries" if _spy_new_low_streak >= SPY_NEW_LOW_THRESHOLD
+                else "waiting for confirmation",
+            )
+        else:
+            if _spy_new_low_streak > 0:
+                logger.info("SPY stabilized — resetting new-low streak")
+            _spy_new_low_streak = 0
+        return _spy_new_low_streak < SPY_NEW_LOW_THRESHOLD
     except Exception as e:
         logger.warning("SPY check error (%s) — allowing entry", e)
         return True
