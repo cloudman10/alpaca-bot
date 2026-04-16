@@ -152,9 +152,7 @@ Two autonomous trading bots running via Alpaca Markets paper trading accounts.
 | Apr 16 | SPY new-lows check: 1 tick → 3 consecutive ticks before blocking entry (main.py _spy_is_stable) | Single SPY dip at open blocked HOOD +19%, SNAP +17% on Apr 14-15 — brief open weakness doesn't mean sustained downtrend | ✅ Done |
 | Apr 16 | Modified: main.py, | (see commit message) | ✅ Done |
 | Apr 16 | Modified: .githooks/pre-commit, | (see commit message) | ✅ Done |
-| Apr 17 | Fix sleep loop bug: replaced `slept < secs` counter with pure `_is_active_period()` check (main.py) | Mac system suspend pauses `time.sleep()` so slept-counter under-counts wall-clock time; bot slept past 9:30 AM ET and missed entire Apr 17 session silently | ✅ Fixed |
-| Apr 17 | Add "ENTRY WINDOW OPEN" log message (main.py scan()) | No log signal when bot entered the 9:30–10:00 AM window — made it look broken when it was actually running | ✅ Done |
-| Apr 17 | Modified: main.py, | (see commit message) | ✅ Done |
+| Apr 17 | Fixed Bot 2 macOS suspend bug — sleep loop now uses pure `_is_active_period()` check instead of counter | Bot missed 25+ hours of sessions silently after Mac suspended overnight | ✅ Done |
 
 ---
 
