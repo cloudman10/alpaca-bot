@@ -301,6 +301,11 @@ def scan():
             logger.info("Outside entry window (9:30–10:00 AM ET) — monitoring only.")
             return
 
+        logger.info(
+            "ENTRY WINDOW OPEN (9:30–10:00 AM ET) — scanning %d symbols: %s",
+            len(_dynamic_watchlist), _dynamic_watchlist,
+        )
+
         if len(active_symbols) >= MAX_POSITIONS:
             logger.info("Max positions (%d) reached — no new entries.", MAX_POSITIONS)
             return
@@ -461,13 +466,12 @@ def main():
                 "Outside market hours — sleeping %.1f hours until pre-market (8:55 AM ET).",
                 secs / 3600,
             )
-            # Sleep in 60-second chunks: re-checks timezone every minute so DST
-            # changes and manual restarts don't cause the bot to over-sleep.
-            slept = 0.0
-            while slept < secs and not _is_active_period():
-                chunk = min(60.0, secs - slept)
-                time.sleep(chunk)
-                slept += chunk
+            # Sleep in 60-second chunks checking _is_active_period() each time.
+            # Do NOT use a slept-counter: time.sleep() pauses during macOS system
+            # suspend, so the counter under-counts elapsed wall-clock time and the
+            # bot can sleep past the next trading session silently.
+            while not _is_active_period():
+                time.sleep(60)
             continue
         time.sleep(HEARTBEAT_SEC)
         scan()
