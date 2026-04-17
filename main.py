@@ -5,7 +5,7 @@ Daily schedule (Eastern time):
   9:00 AM  — pre-market gap scanner runs (gap > 2%, RVOL > 1.0×)
   9:20 AM  — dynamic watchlist finalized (top 5 gap-up candidates)
   9:30 AM  — entry window opens: VWAP pullback + reclaim signals active
-  10:00 AM — entry window closes (no new positions after first 30 min)
+  10:30 AM — entry window closes (IEX 15-min delay; bars available from 10:15 AM)
   4:00 PM  — market close; VWAP stop monitoring ends
 
 Entry logic (all must be met):
@@ -105,10 +105,18 @@ def _in_scanner_window() -> bool:
 
 
 def _in_entry_window() -> bool:
-    """9:30–10:00 AM ET — VWAP pullback entry window (first 30 min only)."""
+    """9:30–10:30 AM ET — VWAP pullback entry window (first 60 min of session).
+
+    Extended from 10:00 to 10:30 AM: IEX feed has a 15-minute data delay, so
+    15-minute bars only become available ~15 min after they close. The 9:30 bar
+    isn't visible until ~10:00 AM and the 9:45 bar not until ~10:15 AM. Keeping
+    the window at 10:00 AM meant the strategy never had 2 intraday bars in time
+    to fire a signal. Extending to 10:30 gives a real 15-min scanning window
+    (10:15–10:30 AM) once IEX catches up.
+    """
     now = _et_now()
     h, m = now.hour, now.minute
-    return (h == 9 and m >= 30) or (h == 10 and m == 0)
+    return (h == 9 and m >= 30) or (h == 10 and m <= 30)
 
 
 def _in_trading_window() -> bool:
@@ -442,7 +450,7 @@ def main():
     print(f"Default watchlist: {', '.join(DEFAULT_WATCHLIST)}")
     print(f"Heartbeat:         {HEARTBEAT_SEC}s")
     print("Scanner window:    9:00–9:29 AM ET (Tier1 >4%, Tier2 >2%, RVOL > 1.0×)")
-    print("Entry window:      9:30–10:00 AM ET")
+    print("Entry window:      9:30–10:30 AM ET (IEX delay; bars arrive ~10:15 AM)")
     print("  Tier 1 (>4%):   VWAP pullback entry | 8% of equity")
     print("  Tier 2 (>2%):   15-min high breakout | 4% of equity (half pos)")
     print("Stop loss:         VWAP at entry (T1) / opening low (T2) | TP: prev_day_high or +4%")

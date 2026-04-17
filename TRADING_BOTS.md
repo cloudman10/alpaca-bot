@@ -67,7 +67,9 @@ Two autonomous trading bots running via Alpaca Markets paper trading accounts.
 | 9:00 AM | Gap scanner runs — gap > 2%, RVOL > 1.0× |
 | 9:20 AM | Dynamic watchlist finalized (top 5 gap-up candidates) |
 | 9:30 AM | Entry window opens: VWAP pullback + reclaim signals active |
-| 10:00 AM | Entry window closes — no new positions after first 30 min |
+| 10:00 AM | IEX-delayed bars begin arriving (9:30 bar visible) |
+| 10:15 AM | 2nd bar visible — VWAP pullback signals can fire |
+| 10:30 AM | Entry window closes — no new positions after this |
 | 4:00 PM | Market close; VWAP stop monitoring ends |
 
 **Entry conditions (all must be met, 9:30–10:00 AM ET only):**
@@ -153,6 +155,8 @@ Two autonomous trading bots running via Alpaca Markets paper trading accounts.
 | Apr 16 | Modified: main.py, | (see commit message) | ✅ Done |
 | Apr 16 | Modified: .githooks/pre-commit, | (see commit message) | ✅ Done |
 | Apr 17 | Fixed Bot 2 macOS suspend bug — sleep loop now uses pure `_is_active_period()` check instead of counter | Bot missed 25+ hours of sessions silently after Mac suspended overnight | ✅ Done |
+| Apr 18 | Extended entry window 10:00 AM → 10:30 AM ET (`_in_entry_window()` in main.py) | IEX feed has 15-min delay: 9:30 bar not visible until 10:00 AM, 9:45 bar not until 10:15 AM — bot had 0 intraday bars during the entire original entry window, zero trades ever possible | ✅ Fixed |
+| Apr 18 | Modified: main.py, | (see commit message) | ✅ Done |
 
 ---
 
