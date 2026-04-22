@@ -16,7 +16,7 @@ from alpaca.trading.requests import (
 )
 from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass
 from alpaca.data.historical import StockHistoricalDataClient
-from alpaca.data.requests import StockBarsRequest
+from alpaca.data.requests import StockBarsRequest, StockLatestTradeRequest
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
 load_dotenv()
@@ -172,6 +172,42 @@ def is_market_open() -> bool:
     """Check if the market is currently open."""
     clock = trading_client.get_clock()
     return clock.is_open
+
+
+def get_latest_trade_price(symbol: str) -> float:
+    """
+    Fetch the latest real-time trade price via the SIP feed.
+    Used by slippage_guard() to compare against a stale IEX signal price.
+    Raises on failure so the caller can decide whether to allow or veto.
+    """
+    req  = StockLatestTradeRequest(symbol_or_symbols=symbol)
+    data = data_client.get_stock_latest_trade(req)
+    return float(data[symbol].price)
+
+
+SLIPPAGE_THRESHOLD = 0.0075   # 0.75% — veto if RT price has moved more than this above signal
+
+
+def slippage_guard(symbol: str, signal_price: float) -> tuple[bool, float]:
+    """
+    Compare the real-time trade price to the IEX-delayed signal price.
+
+    Returns (vetoed, rt_price).  vetoed=True means the order should be skipped.
+
+    A veto fires when the market has already moved up more than SLIPPAGE_THRESHOLD
+    above our signal price, meaning we would be chasing rather than entering at value.
+    """
+    try:
+        rt_price = get_latest_trade_price(symbol)
+        slippage = (rt_price - signal_price) / signal_price
+        if slippage > SLIPPAGE_THRESHOLD:
+            return True, rt_price
+        return False, rt_price
+    except Exception as exc:
+        logger.warning(
+            "[%s] Slippage guard fetch failed (%s) — allowing order", symbol, exc
+        )
+        return False, 0.0
 
 
 def get_prev_day_high(symbol: str) -> float | None:

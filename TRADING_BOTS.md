@@ -159,6 +159,8 @@ Two autonomous trading bots running via Alpaca Markets paper trading accounts.
 | Apr 18 | Modified: main.py, | (see commit message) | ✅ Done |
 | Apr 21 | Added USER_TIMEZONE=Australia/Sydney to .env + check_bots.sh shows Sydney time on every run | User timezone was not tracked anywhere in the project | ✅ Done |
 | Apr 22 | Modified: main.py, | (see commit message) | ✅ Done |
+| Apr 22 | Added Slippage Guard to Bot 2 (alpaca_service.py + main.py): before each BUY, fetches real-time SIP price via `get_latest_trade_price()`; if `(RT - Delayed) / Delayed > 0.75%` vetoes the order and logs `CRITICAL: Slippage Guard Veto` | IEX bars are 15-min delayed — without the guard the bot chases price that has already moved significantly above the signal | ✅ Done |
+| Apr 22 | Modified: alpaca_service.py,main.py, | (see commit message) | ✅ Done |
 
 ---
 
