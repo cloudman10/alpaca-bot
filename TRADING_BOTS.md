@@ -158,6 +158,7 @@ Two autonomous trading bots running via Alpaca Markets paper trading accounts.
 | Apr 18 | Extended entry window 10:00 AM → 10:30 AM ET (`_in_entry_window()` in main.py) | IEX feed has 15-min delay: 9:30 bar not visible until 10:00 AM, 9:45 bar not until 10:15 AM — bot had 0 intraday bars during the entire original entry window, zero trades ever possible | ✅ Fixed |
 | Apr 18 | Modified: main.py, | (see commit message) | ✅ Done |
 | Apr 21 | Added USER_TIMEZONE=Australia/Sydney to .env + check_bots.sh shows Sydney time on every run | User timezone was not tracked anywhere in the project | ✅ Done |
+| Apr 22 | Modified: main.py, | (see commit message) | ✅ Done |
 
 ---
 

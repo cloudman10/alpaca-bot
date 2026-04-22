@@ -24,9 +24,11 @@ Exit logic:
   - Kill switch: 2% daily loss limit
 """
 
+import json
 import os
 import sys
 import signal
+import threading
 import time
 import logging
 from logging.handlers import TimedRotatingFileHandler
@@ -67,6 +69,36 @@ _stream_handler.setFormatter(_log_fmt)
 
 logging.basicConfig(level=logging.INFO, handlers=[_stream_handler, _file_handler])
 logger = logging.getLogger(__name__)
+
+# ── Marshal heartbeat ─────────────────────────────────────────────────────────
+
+_HEARTBEAT_PATH = Path.home() / "TradingApp/logs/heartbeat.json"
+_HEARTBEAT_KEY  = "bot2"
+
+
+def _write_heartbeat() -> None:
+    """Atomically update bot2's entry in the shared heartbeat file."""
+    try:
+        data: dict = {}
+        if _HEARTBEAT_PATH.exists():
+            try:
+                data = json.loads(_HEARTBEAT_PATH.read_text())
+            except Exception:
+                data = {}
+        data[_HEARTBEAT_KEY] = {"ts": time.time(), "pid": os.getpid()}
+        tmp = _HEARTBEAT_PATH.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, indent=2))
+        tmp.replace(_HEARTBEAT_PATH)
+    except Exception:
+        pass   # non-fatal
+
+
+def _heartbeat_loop() -> None:
+    """Background daemon thread — writes heartbeat every 60 s."""
+    while True:
+        _write_heartbeat()
+        time.sleep(60)
+
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -438,6 +470,10 @@ def main():
 
     # Write PID so healthcheck can detect this process regardless of how it was launched.
     Path("logs/bot2.pid").write_text(str(os.getpid()))
+
+    # Start Marshal heartbeat — writes every 60 s so the watchdog knows we're alive.
+    _write_heartbeat()
+    threading.Thread(target=_heartbeat_loop, daemon=True, name="heartbeat").start()
 
     signal.signal(signal.SIGINT,  shutdown)
     signal.signal(signal.SIGTERM, shutdown)
