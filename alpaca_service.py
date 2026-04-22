@@ -2,9 +2,11 @@
 alpaca_service.py — Alpaca client using alpaca-py for account, market data, and orders.
 """
 
+import json
 import os
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -105,6 +107,38 @@ def get_15m_bars(symbol: str, limit: int = 50) -> pd.DataFrame:
     return pd.DataFrame(records)
 
 
+# ── Slippage Guard ────────────────────────────────────────────────────────────
+
+SLIPPAGE_THRESHOLD = 0.0075                                      # 0.75%
+_VETO_LOG_PATH     = Path(__file__).parent / "logs" / "slippage_vetoes.json"
+
+
+def _append_veto_event(symbol: str, signal_price: float, rt_price: float, delta_pct: float) -> None:
+    """Atomically append a veto event to slippage_vetoes.json (capped at 50 entries)."""
+    event = {
+        "ts":           datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "symbol":       symbol,
+        "signal_price": round(signal_price, 4),
+        "rt_price":     round(rt_price, 4),
+        "delta_pct":    round(delta_pct, 4),
+    }
+    try:
+        _VETO_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        events: list = []
+        if _VETO_LOG_PATH.exists():
+            try:
+                events = json.loads(_VETO_LOG_PATH.read_text())
+            except Exception:
+                events = []
+        events.append(event)
+        events = events[-50:]           # keep last 50 so the file doesn't grow unbounded
+        tmp = _VETO_LOG_PATH.with_suffix(".tmp")
+        tmp.write_text(json.dumps(events, indent=2))
+        tmp.replace(_VETO_LOG_PATH)
+    except Exception as exc:
+        logger.warning("Failed to persist veto event: %s", exc)
+
+
 # ── Order placement ──────────────────────────────────────────────────────────
 
 def place_bracket_order(
@@ -114,9 +148,39 @@ def place_bracket_order(
     limit_price: float,
     stop_loss: float,
     take_profit: float,
-) -> str:
-    """Place a bracket order (entry limit + stop-loss + take-profit)."""
+) -> str | None:
+    """Place a bracket order (entry limit + stop-loss + take-profit).
+
+    For BUY orders, a real-time slippage guard runs right before submit_order.
+    If the live SIP price is more than 0.75% above the IEX signal price,
+    the order is vetoed (returns None) and the event is logged + persisted.
+    """
     order_side = OrderSide.BUY if side == "buy" else OrderSide.SELL
+
+    # ── Slippage Guard (BUY only) ─────────────────────────────────────────────
+    # IEX bars are 15-min delayed. Fetch the real-time SIP price right before
+    # submitting so we never chase a price that has already moved away.
+    if order_side == OrderSide.BUY:
+        try:
+            rt_price = get_latest_trade_price(symbol)
+            slippage  = (rt_price - limit_price) / limit_price
+            if slippage > SLIPPAGE_THRESHOLD:
+                delta_pct = slippage * 100
+                logger.critical(
+                    "[SLIPPAGE GUARD] Vetoed entry on %s. "
+                    "Signal: %.4f, Real-time: %.4f. Delta too high.",
+                    symbol, limit_price, rt_price,
+                )
+                _append_veto_event(symbol, limit_price, rt_price, delta_pct)
+                return None
+            logger.info(
+                "[%s] Slippage Guard OK — RT=%.4f vs Signal=%.4f (+%.3f%% < %.2f%% threshold)",
+                symbol, rt_price, limit_price, slippage * 100, SLIPPAGE_THRESHOLD * 100,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[%s] Slippage Guard fetch failed (%s) — allowing order", symbol, exc
+            )
 
     order_request = LimitOrderRequest(
         symbol=symbol,
@@ -175,39 +239,10 @@ def is_market_open() -> bool:
 
 
 def get_latest_trade_price(symbol: str) -> float:
-    """
-    Fetch the latest real-time trade price via the SIP feed.
-    Used by slippage_guard() to compare against a stale IEX signal price.
-    Raises on failure so the caller can decide whether to allow or veto.
-    """
+    """Fetch the latest real-time SIP trade price for a symbol."""
     req  = StockLatestTradeRequest(symbol_or_symbols=symbol)
     data = data_client.get_stock_latest_trade(req)
     return float(data[symbol].price)
-
-
-SLIPPAGE_THRESHOLD = 0.0075   # 0.75% — veto if RT price has moved more than this above signal
-
-
-def slippage_guard(symbol: str, signal_price: float) -> tuple[bool, float]:
-    """
-    Compare the real-time trade price to the IEX-delayed signal price.
-
-    Returns (vetoed, rt_price).  vetoed=True means the order should be skipped.
-
-    A veto fires when the market has already moved up more than SLIPPAGE_THRESHOLD
-    above our signal price, meaning we would be chasing rather than entering at value.
-    """
-    try:
-        rt_price = get_latest_trade_price(symbol)
-        slippage = (rt_price - signal_price) / signal_price
-        if slippage > SLIPPAGE_THRESHOLD:
-            return True, rt_price
-        return False, rt_price
-    except Exception as exc:
-        logger.warning(
-            "[%s] Slippage guard fetch failed (%s) — allowing order", symbol, exc
-        )
-        return False, 0.0
 
 
 def get_prev_day_high(symbol: str) -> float | None:

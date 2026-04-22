@@ -42,7 +42,6 @@ from alpaca_service import (
     get_15m_bars,
     get_prev_day_high,
     place_bracket_order,
-    slippage_guard,
     close_all_positions,
     cancel_all_orders,
     is_market_open,
@@ -434,28 +433,14 @@ def scan():
                     symbol, entry, stop_loss, take_profit, qty, order_cost,
                 )
 
-                # ── Slippage Guard ────────────────────────────────────────
-                # IEX bars are ~15 min delayed. Before submitting, compare the
-                # real-time SIP price to the signal price. If the market has
-                # already moved >0.75% above the signal, the edge is gone.
-                vetoed, rt_price = slippage_guard(symbol, entry)
-                if vetoed:
-                    slippage_pct = (rt_price - entry) / entry * 100
-                    logger.critical(
-                        "CRITICAL: Slippage Guard Veto — [%s] RT=%.2f vs Signal=%.2f "
-                        "(+%.2f%% > 0.75%% threshold) — order CANCELLED",
-                        symbol, rt_price, entry, slippage_pct,
-                    )
-                    continue
-                if rt_price > 0:
-                    logger.info(
-                        "[%s] Slippage Guard OK — RT=%.2f vs Signal=%.2f (%.2f%%)",
-                        symbol, rt_price, entry, (rt_price - entry) / entry * 100,
-                    )
-
+                # place_bracket_order runs the Slippage Guard internally.
+                # Returns None if vetoed (RT price > signal + 0.75%).
                 order_id = place_bracket_order(
                     symbol, qty, "buy", entry, stop_loss, take_profit
                 )
+
+                if order_id is None:
+                    continue   # vetoed — log already written inside alpaca_service
 
                 active_symbols.add(symbol)
                 _symbol_tier[symbol] = current_tier
