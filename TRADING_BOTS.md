@@ -162,7 +162,7 @@ Two autonomous trading bots running via Alpaca Markets paper trading accounts.
 | Apr 22 | Added Slippage Guard to Bot 2 (alpaca_service.py + main.py): before each BUY, fetches real-time SIP price via `get_latest_trade_price()`; if `(RT - Delayed) / Delayed > 0.75%` vetoes the order and logs `CRITICAL: Slippage Guard Veto` | IEX bars are 15-min delayed — without the guard the bot chases price that has already moved significantly above the signal | ✅ Done |
 | Apr 22 | Directive 3 — Slippage Guard moved inside `place_bracket_order` (right before `submit_order`); exact log format `[SLIPPAGE GUARD] Vetoed entry on {symbol}. Signal: {signal_price}, Real-time: {real_price}. Delta too high.`; veto events persisted to `logs/slippage_vetoes.json`; dashboard `/api/bot2/alerts` endpoint + "Skipped Trades" panel in Bot 2 card (polled every 30s, newest-first) | Guard must be unskippable — living inside the order function guarantees it fires regardless of call site; dashboard panel lets user see tonight's vetoes in real time | ✅ Done |
 | Apr 22 | Modified: alpaca_service.py,main.py, | (see commit message) | ✅ Done |
-| Apr 22 | Modified: alpaca_service.py,main.py, | (see commit message) | ✅ Done |
+| Apr 22 | **Major architecture upgrade** — Marshal Agent watchdog (120s stale threshold, SIGTERM→SIGKILL, caffeinate -i restarts); heartbeat.json for all 3 bots (60s threads); Bot 2 Slippage Guard inside place_bracket_order (0.75% veto, logs/slippage_vetoes.json, dashboard alert panel); ADX-based regime model on Bot 1 (SUPER_TREND, BULL=ADX>20, SIDEWAYS=5-bar channel) | Self-healing multi-agent system; slippage guard prevents chasing IEX-delayed entries | ✅ Deployed & Verified |
 
 ---
 
