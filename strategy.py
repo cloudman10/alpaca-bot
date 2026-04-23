@@ -65,12 +65,15 @@ def detect_signal(
 
     # ── Filter to today's bars only ───────────────────────────────────────────
     today = _today_bars(df)
-    if len(today) < 2:
-        logger.info("[%s] Less than 2 intraday bars today — waiting", symbol)
+    if len(today) < 1:
+        logger.info("[%s] No intraday bars yet today — waiting", symbol)
         return None
 
     bar_curr = today.iloc[-1]
-    bar_prev = today.iloc[-2]
+    # With IEX 15-min delay only 1 bar is visible at 10:00 AM ET (vs 2 at 10:15 AM).
+    # When only 1 bar exists, use it as both prev and curr so Condition 3 checks
+    # whether the opening bar's low touched VWAP and Condition 4 checks it closed above.
+    bar_prev = today.iloc[-2] if len(today) >= 2 else today.iloc[-1]
 
     vwap    = bar_curr.get("VWAP")
     rsi     = bar_curr.get("RSI_14")
