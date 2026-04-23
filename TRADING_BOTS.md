@@ -166,6 +166,38 @@ Two autonomous trading bots running via Alpaca Markets paper trading accounts.
 | Apr 24 | Bot 2: Reduced minimum bars from 2→1 in `strategy.py` (Tier 1 VWAP signal) | Effective entry window was only 15 min (10:15–10:30 AM ET) — with 1-bar minimum it doubles to 30 min (10:00–10:30 AM ET). When only 1 bar exists, opening bar acts as both pullback and reclaim reference. Tier 2 ORB keeps 2-bar minimum (needs opening range + breakout bar) | ✅ Done |
 | Apr 24 | Modified: strategy.py, | (see commit message) | ✅ Done |
 | Apr 24 | Added `strategy_check.sh` (5 pre-session checks): (1) IEX feed age test — fetch SPY 15m bar, confirm delay in range; (2) entry window alignment — confirm IEX bar arrival vs window close (bar_duration + IEX_delay + window_end); (3) regime history — Bot 1 last 5 sessions non-BEAR; (4) VWAP signal backtest — replay yesterday's bars for SPY/NVDA/TSLA through Tier 1 conditions; (5) market condition — current regime from log with BEAR lock-out flag. Integrated into `~/Desktop/CheckBots.command` | Needed pre-session validation that data feed, windows, and signal logic are all functioning before each session | ✅ Done |
+| Apr 24 | **Marshal Agent upgraded with strategy validation** — daily health check at 9:00 AM ET: Bot 1 (ADX/regime, zero-trade count, 20D breakout proximity), Bot 2 (IEX delay live test, scanner fallback frequency, effective window), Bot 3 (VIXY fear level, gap-down fallback frequency, BB band width). macOS pre-session alert summarising READY/UNLIKELY per bot. Zero-trade alert after 3 consecutive sessions. Results persisted to `logs/strategy_health.json`. `check_bots.sh` Section 7 shows health summary | Bots were running without trading for days — no automated detection existed | ✅ Done |
+
+---
+
+## Strategy Health Monitoring
+
+The Marshal Agent (`~/TradingApp/agents/marshal_agent.py`) runs a daily strategy health check at **9:00 AM ET** (11:00 PM AEST) before each session opens.
+
+### What is checked
+
+| Bot | Check | Flag condition |
+|-----|-------|----------------|
+| Bot 1 | ADX and market regime (from `trading.log`) | BEAR regime or ADX < 20 |
+| Bot 1 | Consecutive sessions with zero trades | ≥ 3 days with no `BUYING` log event |
+| Bot 1 | Closest symbol to 20D/10D breakout high | All symbols > 2% below their 20D high |
+| Bot 2 | IEX data feed delay (live SPY bar fetch) | Bar age > 35 min during market hours |
+| Bot 2 | Gap scanner fallback frequency | Defaults used ≥ 4 of last 5 sessions |
+| Bot 2 | Effective entry window duration | < 15 min after IEX delay is subtracted |
+| Bot 3 | VIXY fear level vs SMA20 | VIXY > SMA20 × 1.01 (entries suppressed) |
+| Bot 3 | Gap-down scanner fallback frequency | Defaults used ≥ 2 of last 3 sessions |
+| Bot 3 | BB band width (QQQ BB1, 20-period, 2σ) | Width < 1.5% (bands too tight to trigger) |
+
+### Output files
+
+- `~/TradingApp/logs/strategy_health.json` — full results, read by `check_bots.sh` Section 7
+- macOS notification at 9:00 AM ET: per-bot READY / UNLIKELY status + current regime
+- macOS zero-trade alert if any bot has ≥ 3 consecutive sessions with no trades
+
+### Per-bot status labels
+
+- **READY_TO_TRADE** — all checks passed, strategy conditions are met
+- **UNLIKELY_TO_TRADE** — one or more flags raised; see `issues[]` in the JSON for details
 
 ---
 
