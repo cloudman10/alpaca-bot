@@ -55,12 +55,13 @@ from scanner import run_gap_scanner, DEFAULT_WATCHLIST, get_scan_tier
 # ── Logging ───────────────────────────────────────────────────────────────────
 
 os.makedirs("logs", exist_ok=True)
+_BOT2_LOG_PATH = str(Path.home() / "TradingApp/logs/bot2.log")
 
 _log_fmt = logging.Formatter("[%(asctime)s] %(message)s", datefmt="%Y-%m-%dT%H:%M:%SZ")
 _log_fmt.converter = time.gmtime
 
 _file_handler = TimedRotatingFileHandler(
-    "logs/bot.log", when="midnight", backupCount=7, utc=True
+    _BOT2_LOG_PATH, when="midnight", backupCount=7, utc=True
 )
 _file_handler.setFormatter(_log_fmt)
 
@@ -475,6 +476,7 @@ def main():
 
     # Write PID so healthcheck can detect this process regardless of how it was launched.
     Path("logs/bot2.pid").write_text(str(os.getpid()))
+    (Path.home() / "TradingApp/logs/bot2.pid").write_text(str(os.getpid()))
 
     # Start Marshal heartbeat — writes every 60 s so the watchdog knows we're alive.
     _write_heartbeat()
