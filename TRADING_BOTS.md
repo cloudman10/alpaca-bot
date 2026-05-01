@@ -187,6 +187,7 @@ The Marshal Agent (`~/TradingApp/agents/marshal_agent.py`) runs a daily strategy
 | Bot 3 | VIXY fear level vs SMA20 | VIXY > SMA20 × 1.01 (entries suppressed) |
 | Bot 3 | Gap-down scanner fallback frequency | Defaults used ≥ 2 of last 3 sessions |
 | Bot 3 | BB band width (QQQ BB1, 20-period, 2σ) | Width < 1.5% (bands too tight to trigger) |
+| May 1 | Modified: CLAUDE.md,main.py, | (see commit message) | ✅ Done |
 
 ### Output files
 

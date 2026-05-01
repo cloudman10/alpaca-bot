@@ -119,6 +119,7 @@ _symbol_tier:   dict[str, int]         = {}   # tier (1 or 2) per active symbol
 
 _scanner_ran_date:  Date | None = None
 _dynamic_watchlist: list[str]   = list(DEFAULT_WATCHLIST)
+_spy_streak_reset_date: Date | None = None
 
 
 # ── Time helpers ──────────────────────────────────────────────────────────────
@@ -195,8 +196,20 @@ _spy_new_low_streak: int = 0
 SPY_NEW_LOW_THRESHOLD = 3   # consecutive new-low ticks required to block
 
 def _spy_is_stable() -> bool:
-    """Returns True unless SPY has made new lows on 3 consecutive scan ticks."""
-    global _spy_new_low_streak
+    """Returns True unless SPY has made new lows on 3 consecutive scan ticks.
+
+    Resets the streak to 0 once per day at market open (first call on or after
+    9:30 AM ET) so pre-market accumulation never carries into the entry window.
+    """
+    global _spy_new_low_streak, _spy_streak_reset_date
+    today = _et_now().date()
+    if _spy_streak_reset_date != today:
+        if _spy_new_low_streak > 0:
+            logger.info(
+                "Market open — resetting SPY new-low streak (%d → 0)", _spy_new_low_streak
+            )
+        _spy_new_low_streak    = 0
+        _spy_streak_reset_date = today
     try:
         df = get_1m_bars("SPY", 3)
         if len(df) < 3:
