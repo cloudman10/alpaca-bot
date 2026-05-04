@@ -25,6 +25,6 @@ Windows machine folder locations:
 
 Mac machine folder locations:
 - Bot 1 (trading-bot): ~/TradingApp
-- Bot 2 (alpaca-bot): ~/Documents/alpaca-bot
+- Bot 2 (alpaca-bot): ~/TradingApp/bot2_gap_momentum
 
 NEVER clone a repo without first running ls to verify the folder doesn't already exist.

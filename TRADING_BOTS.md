@@ -189,6 +189,7 @@ The Marshal Agent (`~/TradingApp/agents/marshal_agent.py`) runs a daily strategy
 | Bot 3 | BB band width (QQQ BB1, 20-period, 2σ) | Width < 1.5% (bands too tight to trigger) |
 | May 1 | Modified: CLAUDE.md,main.py, | (see commit message) | ✅ Done |
 | May 2 | Modified: main.py, | (see commit message) | ✅ Done |
+| May 4 | Modified: CLAUDE.md,run_bot.sh, | (see commit message) | ✅ Done |
 
 ### Output files
 
