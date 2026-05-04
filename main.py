@@ -198,9 +198,18 @@ def _spy_is_stable() -> bool:
 
     Resets the streak to 0 once per day at market open (first call on or after
     9:30 AM ET) so pre-market accumulation never carries into the entry window.
+
+    Streak counting is suppressed before 9:32 AM ET — the first 90 seconds of
+    the session are excluded because stock bar data often hasn't arrived yet,
+    and SPY frequently prints new intraday lows on the opening tick of a
+    gap-up day before settling. A block triggered in this window would silence
+    the entire entry window before any signal can form.
     """
     global _spy_new_low_streak, _spy_streak_reset_date
-    today = _et_now().date()
+    now_et = _et_now()
+    if now_et.hour == 9 and now_et.minute < 32:
+        return True
+    today = now_et.date()
     if _spy_streak_reset_date != today:
         if _spy_new_low_streak > 0:
             logger.info(

@@ -190,6 +190,7 @@ The Marshal Agent (`~/TradingApp/agents/marshal_agent.py`) runs a daily strategy
 | May 1 | Modified: CLAUDE.md,main.py, | (see commit message) | ✅ Done |
 | May 2 | Modified: main.py, | (see commit message) | ✅ Done |
 | May 4 | Modified: CLAUDE.md,run_bot.sh, | (see commit message) | ✅ Done |
+| May 5 | Modified: main.py, | (see commit message) | ✅ Done |
 
 ### Output files
 
