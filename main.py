@@ -193,17 +193,29 @@ def _seconds_until_premarket() -> float:
 _spy_new_low_streak: int = 0
 SPY_NEW_LOW_THRESHOLD = 3   # consecutive new-low ticks required to block
 
-def _spy_is_stable() -> bool:
+def _any_bars_available(watchlist: list[str]) -> bool:
+    """Return True if at least one watchlist symbol has intraday bar data."""
+    for symbol in watchlist:
+        try:
+            if len(get_1m_bars(symbol, 1)) > 0:
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def _spy_is_stable(watchlist: list[str] | None = None) -> bool:
     """Returns True unless SPY has made new lows on 3 consecutive scan ticks.
 
     Resets the streak to 0 once per day at market open (first call on or after
     9:30 AM ET) so pre-market accumulation never carries into the entry window.
 
-    Streak counting is suppressed before 9:32 AM ET — the first 90 seconds of
-    the session are excluded because stock bar data often hasn't arrived yet,
-    and SPY frequently prints new intraday lows on the opening tick of a
-    gap-up day before settling. A block triggered in this window would silence
-    the entire entry window before any signal can form.
+    Two guards prevent premature blocking:
+    1. Hard time guard: streak counting suppressed before 9:32 AM ET.
+    2. Bar-availability guard: streak only increments when at least one
+       watchlist symbol already has intraday bar data. If no bars exist yet,
+       the SPY new low is logged but not counted — there is nothing to trade,
+       so a block would be meaningless and would persist past data arrival.
     """
     global _spy_new_low_streak, _spy_streak_reset_date
     now_et = _et_now()
@@ -227,13 +239,18 @@ def _spy_is_stable() -> bool:
         low_2   = df["low"].iloc[-3]
         is_new_low = low_now < low_1 or low_now < low_2
         if is_new_low:
-            _spy_new_low_streak += 1
-            logger.info(
-                "SPY new low detected (streak %d/%d) — %s",
-                _spy_new_low_streak, SPY_NEW_LOW_THRESHOLD,
-                "blocking entries" if _spy_new_low_streak >= SPY_NEW_LOW_THRESHOLD
-                else "waiting for confirmation",
-            )
+            if watchlist and not _any_bars_available(watchlist):
+                logger.info(
+                    "SPY new low detected but no bars available yet — skipping streak"
+                )
+            else:
+                _spy_new_low_streak += 1
+                logger.info(
+                    "SPY new low detected (streak %d/%d) — %s",
+                    _spy_new_low_streak, SPY_NEW_LOW_THRESHOLD,
+                    "blocking entries" if _spy_new_low_streak >= SPY_NEW_LOW_THRESHOLD
+                    else "waiting for confirmation",
+                )
         else:
             if _spy_new_low_streak > 0:
                 logger.info("SPY stabilized — resetting new-low streak")
@@ -381,7 +398,7 @@ def scan():
                 _symbol_tier.pop(sym, None)
                 logger.info("[%s] Position closed — slot freed.", sym)
 
-        spy_stable   = _spy_is_stable()
+        spy_stable   = _spy_is_stable(_dynamic_watchlist)
         current_tier = get_scan_tier()
 
         for symbol in _dynamic_watchlist:
