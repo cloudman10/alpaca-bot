@@ -8,7 +8,8 @@ Tier 1 entry (VWAP pullback — all must be met):
   4. Current bar is a bullish candle (close > open)
   5. RSI(14) between 45–65 (post-gap RSI in a healthy range, not overbought)
   6. Volume on current bar > 1.5× 20-bar average (buyers confirming the reclaim)
-  7. SPY not making new lows (passed in as spy_stable)
+  7. Volume acceleration > 1.5× (recent 5 bars vs prior 5 bars — confirms institutional participation)
+  8. SPY not making new lows (passed in as spy_stable)
 
 Tier 2 entry (15-min opening high breakout — all must be met):
   1. Current bar is within first 30 min of session — enforced by caller
@@ -29,10 +30,24 @@ from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
-RSI_MIN = 45    # lower bound — avoid entries when stock is still weak
-RSI_MAX = 65    # upper bound — avoid chasing overbought gap continuation
+RSI_MIN  = 45   # lower bound — avoid entries when stock is still weak
+RSI_MAX  = 65   # upper bound — avoid chasing overbought gap continuation
 VOL_MULT = 1.5  # volume must be > 1.5× 20-bar average on entry candle
+VACC_MIN = 1.5  # volume acceleration: recent 5 bars must average > 1.5× prior 5 bars
 ET = ZoneInfo("America/New_York")
+
+
+def get_volume_acceleration(bars: pd.DataFrame, window: int = 5) -> float:
+    """Return recent/prior volume ratio using today's 15-min bars.
+
+    Compares the mean volume of the last `window` bars against the mean of
+    the preceding `window` bars. Returns 1.0 (neutral) when insufficient bars.
+    """
+    if len(bars) < window + 1:
+        return 1.0
+    recent_avg = bars["volume"].iloc[-window:].mean()
+    prior_avg  = bars["volume"].iloc[-(window * 2):-window].mean()
+    return float(recent_avg / (prior_avg + 1e-9))
 
 
 def _today_bars(df: pd.DataFrame) -> pd.DataFrame:
@@ -125,6 +140,15 @@ def detect_signal(
             "[%s] Volume %.0f < %.0f (%.1fx avg) — skip",
             symbol, curr_vol, vol_avg * VOL_MULT, VOL_MULT,
         )
+        return None
+
+    # ── Condition 7: Volume acceleration > 1.5× ──────────────────────────────
+    vacc = get_volume_acceleration(today)
+    logger.info(
+        "[%s] Volume acceleration: %.2fx — %s",
+        symbol, vacc, "PASS" if vacc >= VACC_MIN else "FAIL",
+    )
+    if vacc < VACC_MIN:
         return None
 
     # ── All conditions met ────────────────────────────────────────────────────
