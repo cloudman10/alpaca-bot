@@ -193,6 +193,7 @@ The Marshal Agent (`~/TradingApp/agents/marshal_agent.py`) runs a daily strategy
 | May 5 | Modified: main.py, | (see commit message) | ✅ Done |
 | May 6 | Modified: main.py, | (see commit message) | ✅ Done |
 | May 6 | Modified: strategy.py, | (see commit message) | ✅ Done |
+| May 7 | Modified: alpaca_service.py,scanner.py, | (see commit message) | ✅ Done |
 
 ### Output files
 

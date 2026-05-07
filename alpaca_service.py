@@ -50,7 +50,7 @@ def get_balance() -> dict:
 # ── Market data ──────────────────────────────────────────────────────────────
 
 def get_1m_bars(symbol: str, limit: int = 10) -> pd.DataFrame:
-    """Fetch 1-minute bars for a symbol over the last hour using IEX feed."""
+    """Fetch 1-minute bars for a symbol over the last hour using SIP feed."""
     start = datetime.utcnow() - timedelta(hours=1)
 
     request = StockBarsRequest(
@@ -58,7 +58,7 @@ def get_1m_bars(symbol: str, limit: int = 10) -> pd.DataFrame:
         timeframe=TimeFrame(amount=1, unit=TimeFrameUnit.Minute),
         start=start,
         limit=limit,
-        feed="iex",
+        feed="sip",
     )
 
     bars = data_client.get_stock_bars(request)
@@ -79,7 +79,7 @@ def get_1m_bars(symbol: str, limit: int = 10) -> pd.DataFrame:
 
 
 def get_15m_bars(symbol: str, limit: int = 50) -> pd.DataFrame:
-    """Fetch 15-minute bars for a symbol over the last 7 days using IEX feed."""
+    """Fetch 15-minute bars for a symbol over the last 7 days using SIP feed."""
     start = datetime.utcnow() - timedelta(days=7)
 
     request = StockBarsRequest(
@@ -87,7 +87,7 @@ def get_15m_bars(symbol: str, limit: int = 50) -> pd.DataFrame:
         timeframe=TimeFrame(amount=15, unit=TimeFrameUnit.Minute),
         start=start,
         limit=limit,
-        feed="iex",
+        feed="sip",
     )
 
     bars = data_client.get_stock_bars(request)
@@ -259,7 +259,7 @@ def get_prev_day_high(symbol: str) -> float | None:
         timeframe=TimeFrame.Day,
         start=start,
         limit=5,
-        feed="iex",
+        feed="sip",
     )
     try:
         bars     = data_client.get_stock_bars(request)

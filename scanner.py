@@ -76,7 +76,7 @@ def get_scan_tier() -> int:
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 def _get_daily_bars(symbol: str, days: int = 15) -> pd.DataFrame:
-    """Fetch recent daily bars for a symbol via IEX."""
+    """Fetch recent daily bars for a symbol via SIP (consolidated tape)."""
     end   = datetime.now(timezone.utc)
     start = end - timedelta(days=days)
 
@@ -85,7 +85,7 @@ def _get_daily_bars(symbol: str, days: int = 15) -> pd.DataFrame:
         timeframe=TimeFrame.Day,
         start=start,
         end=end,
-        feed=DataFeed.IEX,
+        feed=DataFeed.SIP,
     )
     bars = data_client.get_stock_bars(req)
     df   = bars.df
@@ -99,9 +99,7 @@ def _get_daily_bars(symbol: str, days: int = 15) -> pd.DataFrame:
 def _get_latest_intraday_price(symbol: str) -> float | None:
     """
     Get the latest available price for gap calculation.
-    Uses 1-min bars from the last 2 hours — picks up pre-market on SIP;
-    on IEX free tier this returns the most recent bar (may be yesterday's close
-    if pre-market is not yet available).
+    Uses 1-min bars from the last 2 hours via SIP — captures pre-market trades.
     Returns None if no data is found.
     """
     end   = datetime.now(timezone.utc)
@@ -112,7 +110,7 @@ def _get_latest_intraday_price(symbol: str) -> float | None:
         timeframe=TimeFrame(amount=1, unit=TimeFrameUnit.Minute),
         start=start,
         end=end,
-        feed=DataFeed.IEX,
+        feed=DataFeed.SIP,
     )
     try:
         bars = data_client.get_stock_bars(req)
@@ -142,7 +140,7 @@ def _get_premarket_volume(symbol: str) -> float | None:
         timeframe=TimeFrame(amount=1, unit=TimeFrameUnit.Minute),
         start=start,
         end=end,
-        feed=DataFeed.IEX,
+        feed=DataFeed.SIP,
     )
     try:
         bars = data_client.get_stock_bars(req)
