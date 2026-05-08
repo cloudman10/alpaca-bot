@@ -50,14 +50,19 @@ def get_balance() -> dict:
 # ── Market data ──────────────────────────────────────────────────────────────
 
 def get_1m_bars(symbol: str, limit: int = 10) -> pd.DataFrame:
-    """Fetch 1-minute bars for a symbol over the last hour using SIP feed."""
-    start = datetime.utcnow() - timedelta(hours=1)
+    """Fetch the most recent 1-minute bars (last 30 min) using SIP feed.
+
+    Uses a 30-minute window without a limit so that .iloc[-1] is always
+    the most recent bar. The `limit` parameter is kept for API compatibility
+    but is not passed to Alpaca — passing limit=N with a time-range start
+    returns the OLDEST N bars, not the newest N.
+    """
+    start = datetime.now(timezone.utc) - timedelta(minutes=30)
 
     request = StockBarsRequest(
         symbol_or_symbols=symbol,
         timeframe=TimeFrame(amount=1, unit=TimeFrameUnit.Minute),
         start=start,
-        limit=limit,
         feed="sip",
     )
 
@@ -79,14 +84,19 @@ def get_1m_bars(symbol: str, limit: int = 10) -> pd.DataFrame:
 
 
 def get_15m_bars(symbol: str, limit: int = 50) -> pd.DataFrame:
-    """Fetch 15-minute bars for a symbol over the last 7 days using SIP feed."""
-    start = datetime.utcnow() - timedelta(days=7)
+    """Fetch 15-minute bars for the last 7 days using SIP feed.
+
+    Does NOT pass `limit` to Alpaca — passing limit=N with a time-range
+    start returns the OLDEST N bars, not the newest N. Without a limit
+    the full date window is returned (~300 bars), ensuring today's bars
+    are always present at the tail of the DataFrame.
+    """
+    start = datetime.now(timezone.utc) - timedelta(days=7)
 
     request = StockBarsRequest(
         symbol_or_symbols=symbol,
         timeframe=TimeFrame(amount=15, unit=TimeFrameUnit.Minute),
         start=start,
-        limit=limit,
         feed="sip",
     )
 
@@ -258,7 +268,6 @@ def get_prev_day_high(symbol: str) -> float | None:
         symbol_or_symbols=symbol,
         timeframe=TimeFrame.Day,
         start=start,
-        limit=5,
         feed="sip",
     )
     try:
