@@ -116,6 +116,8 @@ kill_switch:    DailyKillSwitch | None = None
 is_running:     bool                   = False
 active_symbols: set[str]               = set()
 _symbol_tier:   dict[str, int]         = {}   # tier (1 or 2) per active symbol
+_traded_today:  set[str]               = set()   # symbols locked for rest of day after any close
+_traded_today_date: Date | None        = None    # reset daily
 
 _scanner_ran_date:  Date | None = None
 _dynamic_watchlist: list[str]   = list(DEFAULT_WATCHLIST)
@@ -391,18 +393,29 @@ def scan():
         open_positions   = get_open_positions()
         position_symbols = {p["symbol"] for p in open_positions}
 
+        # Reset daily traded-lock at start of each new session
+        global _traded_today, _traded_today_date
+        today_et = _et_now().date()
+        if _traded_today_date != today_et:
+            _traded_today = set()
+            _traded_today_date = today_et
+
         # Sync active_symbols with real positions
         for sym in list(active_symbols):
             if sym not in position_symbols:
                 active_symbols.discard(sym)
                 _symbol_tier.pop(sym, None)
-                logger.info("[%s] Position closed — slot freed.", sym)
+                _traded_today.add(sym)   # lock symbol for rest of day
+                logger.info("[%s] Position closed — slot freed. Locked for rest of day.", sym)
 
         spy_stable   = _spy_is_stable(_dynamic_watchlist)
         current_tier = get_scan_tier()
 
         for symbol in _dynamic_watchlist:
             if symbol in active_symbols:
+                continue
+            if symbol in _traded_today:
+                logger.info("[%s] Already traded today — skipping.", symbol)
                 continue
             if len(active_symbols) >= MAX_POSITIONS:
                 break
