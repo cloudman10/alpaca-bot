@@ -107,7 +107,7 @@ HEARTBEAT_SEC         = 15
 BAR_LIMIT             = 50
 POSITION_SIZE_PCT     = 0.08   # Tier 1: 8% of equity per position
 POSITION_SIZE_PCT_T2  = 0.04   # Tier 2: 4% of equity (half position)
-MAX_POSITIONS         = 3
+MAX_POSITIONS         = 5
 ET               = pytz.timezone("America/New_York")
 
 # ── State ─────────────────────────────────────────────────────────────────────
