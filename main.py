@@ -34,6 +34,7 @@ import logging
 from logging.handlers import TimedRotatingFileHandler
 from datetime import date as Date, datetime, timedelta, timezone
 from pathlib import Path
+import urllib3.exceptions
 import pytz
 
 from alpaca_service import (
@@ -104,6 +105,7 @@ def _heartbeat_loop() -> None:
 # ── Config ────────────────────────────────────────────────────────────────────
 
 HEARTBEAT_SEC         = 15
+MAX_RECONNECT_RETRIES = 5
 BAR_LIMIT             = 50
 POSITION_SIZE_PCT     = 0.08   # Tier 1: 8% of equity per position
 POSITION_SIZE_PCT_T2  = 0.04   # Tier 2: 4% of equity (half position)
@@ -560,22 +562,39 @@ def main():
     kill_switch = DailyKillSwitch(account["equity"])
 
     scan()
+    _reconnect_attempts = 0
     while True:
-        if not _is_active_period():
-            secs = _seconds_until_premarket()
-            logger.info(
-                "Outside market hours — sleeping %.1f hours until pre-market (8:55 AM ET).",
-                secs / 3600,
+        try:
+            if not _is_active_period():
+                secs = _seconds_until_premarket()
+                logger.info(
+                    "Outside market hours — sleeping %.1f hours until pre-market (8:55 AM ET).",
+                    secs / 3600,
+                )
+                # Sleep in 60-second chunks checking _is_active_period() each time.
+                # Do NOT use a slept-counter: time.sleep() pauses during macOS system
+                # suspend, so the counter under-counts elapsed wall-clock time and the
+                # bot can sleep past the next trading session silently.
+                while not _is_active_period():
+                    time.sleep(60)
+                continue
+            time.sleep(HEARTBEAT_SEC)
+            scan()
+            _reconnect_attempts = 0
+        except (ConnectionError, urllib3.exceptions.MaxRetryError,
+                urllib3.exceptions.NewConnectionError) as e:
+            _reconnect_attempts += 1
+            if _reconnect_attempts > MAX_RECONNECT_RETRIES:
+                logger.error(
+                    "Network error — max reconnect retries (%d) exceeded. Shutting down.",
+                    MAX_RECONNECT_RETRIES,
+                )
+                sys.exit(1)
+            logger.warning(
+                "Network error (%s) — retry %d/%d in 60 s ...",
+                e, _reconnect_attempts, MAX_RECONNECT_RETRIES,
             )
-            # Sleep in 60-second chunks checking _is_active_period() each time.
-            # Do NOT use a slept-counter: time.sleep() pauses during macOS system
-            # suspend, so the counter under-counts elapsed wall-clock time and the
-            # bot can sleep past the next trading session silently.
-            while not _is_active_period():
-                time.sleep(60)
-            continue
-        time.sleep(HEARTBEAT_SEC)
-        scan()
+            time.sleep(60)
 
 
 if __name__ == "__main__":
