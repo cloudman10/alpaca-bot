@@ -482,7 +482,7 @@ def scan():
                 stop_loss = signal["stop_loss"]   # VWAP at entry time
 
                 logger.info(
-                    "[%s] Entry=%.2f SL=%.2f (VWAP) TP=%.2f qty=%d cost=$%.2f",
+                    "[%s] Entry=%.2f SL=%.2f (VWAP or 0.5%%) TP=%.2f qty=%d cost=$%.2f",
                     symbol, entry, stop_loss, take_profit, qty, order_cost,
                 )
 

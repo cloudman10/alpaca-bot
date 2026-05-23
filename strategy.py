@@ -20,7 +20,7 @@ Tier 2 entry (15-min opening high breakout — all must be met):
 
 Exit rules (managed in main.py):
   - Take Profit : previous day high (if above entry) OR 4% above entry
-  - Stop Loss   : VWAP at entry (Tier 1) / opening bar low (Tier 2)
+  - Stop Loss   : min(VWAP, entry × 0.995) — VWAP or 0.5% below entry, whichever is lower/wider (Tier 1)
   - Kill Switch : 2% daily loss limit (DailyKillSwitch in risk_manager.py)
 """
 
@@ -153,11 +153,15 @@ def detect_signal(
 
     # ── All conditions met ────────────────────────────────────────────────────
     entry     = curr_close
-    stop_loss = vwap   # stop below VWAP at time of entry
+    # Use whichever stop is wider (lower price): VWAP or 0.5% below entry.
+    # Pure VWAP stops can be <0.1% from entry at the open, getting hit by
+    # normal bid/ask spread noise before the trade has room to develop.
+    stop_loss = min(vwap, entry * 0.995)
 
     logger.info(
-        "[%s] SIGNAL | VWAP reclaim | entry=%.2f VWAP=%.2f | RSI=%.1f | vol=%.0f/%.0f",
-        symbol, entry, vwap, rsi, curr_vol, vol_avg * VOL_MULT,
+        "[%s] SIGNAL | VWAP reclaim | entry=%.2f VWAP=%.2f stop=%.2f (%.2f%%) | RSI=%.1f | vol=%.0f/%.0f",
+        symbol, entry, vwap, stop_loss, (entry - stop_loss) / entry * 100,
+        rsi, curr_vol, vol_avg * VOL_MULT,
     )
 
     return {
