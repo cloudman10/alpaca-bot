@@ -6,16 +6,16 @@ Tier 1 entry (VWAP pullback — all must be met):
   2. Previous bar's low touched or was at/below VWAP (pullback to VWAP occurred)
   3. Current bar closes ABOVE VWAP (bullish reclaim)
   4. Current bar is a bullish candle (close > open)
-  5. RSI(14) between 45–65 (post-gap RSI in a healthy range, not overbought)
+  5. RSI(14) between 40–75 (wider range — gap stocks legitimately open with RSI 65–75)
   6. Volume on current bar > 1.5× 20-bar average (buyers confirming the reclaim)
   7. Volume acceleration > 1.5× (recent 5 bars vs prior 5 bars — confirms institutional participation)
-  8. SPY not making new lows (passed in as spy_stable)
+  8. SPY not down >1% from today's open (passed in as spy_stable)
 
 Tier 2 entry (15-min opening high breakout — all must be met):
   1. Current bar is within first 30 min of session — enforced by caller
   2. Price breaks above the high of the first 15-min bar (opening range high)
   3. Current bar is a bullish candle (close > open)
-  4. SPY not making new lows (passed in as spy_stable)
+  4. SPY not down >1% from today's open (passed in as spy_stable)
   Stop loss: low of the opening 15-min bar
 
 Exit rules (managed in main.py):
@@ -30,8 +30,8 @@ from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
-RSI_MIN  = 45   # lower bound — avoid entries when stock is still weak
-RSI_MAX  = 65   # upper bound — avoid chasing overbought gap continuation
+RSI_MIN  = 40   # lower bound — avoid entries when stock is still weak
+RSI_MAX  = 75   # upper bound — gap stocks legitimately open with RSI 65-75
 VOL_MULT = 1.5  # volume must be > 1.5× 20-bar average on entry candle
 VACC_MIN = 1.5  # volume acceleration: recent 5 bars must average > 1.5× prior 5 bars
 ET = ZoneInfo("America/New_York")
@@ -104,7 +104,7 @@ def detect_signal(
 
     # ── Condition 1: SPY market confirmation ──────────────────────────────────
     if not spy_stable:
-        logger.info("[%s] SPY making new lows — skip entry", symbol)
+        logger.info("[%s] SPY down >1% from open — skip entry", symbol)
         return None
 
     # ── Condition 2: RSI 45–65 ────────────────────────────────────────────────
@@ -189,7 +189,7 @@ def detect_tier2_signal(
     No VWAP pullback required — enters on break of first 15-min bar's high.
 
     Conditions:
-      1. SPY not making new lows
+      1. SPY not down >1% from today's open
       2. Price (current close) > high of first 15-min bar (opening range high)
       3. Current bar is bullish (close > open)
 
@@ -206,7 +206,7 @@ def detect_tier2_signal(
 
     # ── Condition 1: SPY market confirmation ──────────────────────────────────
     if not spy_stable:
-        logger.info("[%s] SPY making new lows — skip Tier 2 entry", symbol)
+        logger.info("[%s] SPY down >1% from open — skip Tier 2 entry", symbol)
         return None
 
     opening_bar  = today.iloc[0]   # first 15-min bar: 9:30–9:45 AM ET

@@ -123,7 +123,6 @@ _traded_today_date: Date | None        = None    # reset daily
 
 _scanner_ran_date:  Date | None = None
 _dynamic_watchlist: list[str]   = list(DEFAULT_WATCHLIST)
-_spy_streak_reset_date: Date | None = None
 
 
 # ── Time helpers ──────────────────────────────────────────────────────────────
@@ -191,75 +190,51 @@ def _seconds_until_premarket() -> float:
 
 
 # ── SPY stability filter ──────────────────────────────────────────────────────
-# Require 3 consecutive new-low detections before blocking entry.
-# A single SPY dip at the open (common on gap-up days) no longer blocks;
-# only a sustained 3-tick downtrend does.
-_spy_new_low_streak: int = 0
-SPY_NEW_LOW_THRESHOLD = 3   # consecutive new-low ticks required to block
+# Block entries only when SPY is down >1% from today's open price.
+# Isolated dips and bid/ask noise no longer block; only genuine market weakness
+# (sustained >1% sell-off from open) does.
+SPY_DROP_THRESHOLD = 0.01   # 1% drop from today's open = block entries
 
-def _any_bars_available(watchlist: list[str]) -> bool:
-    """Return True if at least one watchlist symbol has intraday bar data."""
-    for symbol in watchlist:
-        try:
-            if len(get_1m_bars(symbol, 1)) > 0:
-                return True
-        except Exception:
-            pass
-    return False
+_spy_open_price:      float | None = None
+_spy_open_date:       object       = None   # date when open price was captured
 
 
 def _spy_is_stable(watchlist: list[str] | None = None) -> bool:
-    """Returns True unless SPY has made new lows on 3 consecutive scan ticks.
+    """Returns True unless SPY is down more than 1% from today's opening price.
 
-    Resets the streak to 0 once per day at market open (first call on or after
-    9:30 AM ET) so pre-market accumulation never carries into the entry window.
-
-    Two guards prevent premature blocking:
-    1. Hard time guard: streak counting suppressed before 9:32 AM ET.
-    2. Bar-availability guard: streak only increments when at least one
-       watchlist symbol already has intraday bar data. If no bars exist yet,
-       the SPY new low is logged but not counted — there is nothing to trade,
-       so a block would be meaningless and would persist past data arrival.
+    Captures SPY's open price on the first call each day (from the first
+    available 1-min bar). If SPY drops >1% from that open, entries are blocked
+    for the rest of the session. Resets automatically each new trading day.
     """
-    global _spy_new_low_streak, _spy_streak_reset_date
-    now_et = _et_now()
-    if now_et.hour == 9 and now_et.minute < 32:
-        return True
-    today = now_et.date()
-    if _spy_streak_reset_date != today:
-        if _spy_new_low_streak > 0:
-            logger.info(
-                "Market open — resetting SPY new-low streak (%d → 0)", _spy_new_low_streak
-            )
-        _spy_new_low_streak    = 0
-        _spy_streak_reset_date = today
+    global _spy_open_price, _spy_open_date
+    today = _et_now().date()
     try:
-        df = get_1m_bars("SPY", 3)
-        if len(df) < 3:
-            _spy_new_low_streak = 0
+        df = get_1m_bars("SPY", 5)
+        if df.empty:
+            logger.warning("SPY check: no bars — allowing entry")
             return True
-        low_now = df["low"].iloc[-1]
-        low_1   = df["low"].iloc[-2]
-        low_2   = df["low"].iloc[-3]
-        is_new_low = low_now < low_1 or low_now < low_2
-        if is_new_low:
-            if watchlist and not _any_bars_available(watchlist):
-                logger.info(
-                    "SPY new low detected but no bars available yet — skipping streak"
-                )
-            else:
-                _spy_new_low_streak += 1
-                logger.info(
-                    "SPY new low detected (streak %d/%d) — %s",
-                    _spy_new_low_streak, SPY_NEW_LOW_THRESHOLD,
-                    "blocking entries" if _spy_new_low_streak >= SPY_NEW_LOW_THRESHOLD
-                    else "waiting for confirmation",
-                )
-        else:
-            if _spy_new_low_streak > 0:
-                logger.info("SPY stabilized — resetting new-low streak")
-            _spy_new_low_streak = 0
-        return _spy_new_low_streak < SPY_NEW_LOW_THRESHOLD
+
+        # Capture today's open price once per day (first bar's open)
+        if _spy_open_date != today or _spy_open_price is None:
+            _spy_open_price = float(df["open"].iloc[0])
+            _spy_open_date  = today
+            logger.info("SPY open price captured: %.2f", _spy_open_price)
+
+        spy_now  = float(df["close"].iloc[-1])
+        pct_from_open = (spy_now - _spy_open_price) / _spy_open_price
+
+        if pct_from_open < -SPY_DROP_THRESHOLD:
+            logger.info(
+                "SPY down %.2f%% from open (%.2f → %.2f) — blocking entries",
+                pct_from_open * 100, _spy_open_price, spy_now,
+            )
+            return False
+
+        logger.info(
+            "SPY %.2f%% from open (%.2f → %.2f) — entries allowed",
+            pct_from_open * 100, _spy_open_price, spy_now,
+        )
+        return True
     except Exception as e:
         logger.warning("SPY check error (%s) — allowing entry", e)
         return True
