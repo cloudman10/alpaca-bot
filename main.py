@@ -51,7 +51,7 @@ from alpaca_service import (
 from indicators import compute_indicators
 from strategy import detect_signal, detect_tier2_signal
 from risk_manager import calc_position_size, DailyKillSwitch
-from scanner import run_gap_scanner, DEFAULT_WATCHLIST, get_scan_tier
+from scanner import run_gap_scanner, get_scan_tier
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -121,8 +121,9 @@ _symbol_tier:   dict[str, int]         = {}   # tier (1 or 2) per active symbol
 _traded_today:  set[str]               = set()   # symbols locked for rest of day after any close
 _traded_today_date: Date | None        = None    # reset daily
 
-_scanner_ran_date:  Date | None = None
-_dynamic_watchlist: list[str]   = list(DEFAULT_WATCHLIST)
+_scanner_ran_date:      Date | None = None
+_dynamic_watchlist:     list[str]   = []
+_standdown_logged_date: Date | None = None
 
 
 # ── Time helpers ──────────────────────────────────────────────────────────────
@@ -259,13 +260,16 @@ def _run_scanner_if_needed():
     try:
         _dynamic_watchlist = run_gap_scanner()
     except Exception as e:
-        logger.error("Scanner failed (%s) — keeping default watchlist", e)
-        _dynamic_watchlist = list(DEFAULT_WATCHLIST)
+        logger.error("Scanner failed (%s) — standing down (empty watchlist)", e)
+        _dynamic_watchlist = []
 
     _scanner_ran_date = today
     tier = get_scan_tier()
-    tier_label = {1: "Tier 1 (>4%% full pos)", 2: "Tier 2 (>2%% half pos)", 0: "default (no gap)"}
-    logger.info("Today's watchlist: %s  [%s]", _dynamic_watchlist, tier_label.get(tier, "unknown"))
+    tier_label = {1: "Tier 1 (>4%% full pos)", 2: "Tier 2 (>2%% half pos)", 0: "no gap — standing down"}
+    if _dynamic_watchlist:
+        logger.info("Today's watchlist: %s  [%s]", _dynamic_watchlist, tier_label.get(tier, "unknown"))
+    else:
+        logger.info("Today's watchlist: []  [%s]", tier_label.get(tier, "unknown"))
     logger.info("──────────────────────────────────────────────────────")
 
 
@@ -324,9 +328,15 @@ def _monitor_positions_for_vwap_stop():
 
 def scan():
     """One heartbeat tick."""
-    global is_running
+    global is_running, _standdown_logged_date
 
     _run_scanner_if_needed()
+
+    if not _dynamic_watchlist:
+        if _standdown_logged_date != _et_now().date():
+            logger.info("[SCANNER] No gap candidates today — standing down from entries.")
+            _standdown_logged_date = _et_now().date()
+        return
 
     if is_running:
         return
@@ -517,7 +527,6 @@ def main():
     print("   Tiered Gap System | Tier1 VWAP + Tier2 ORB          ")
     print("═══════════════════════════════════════════════════════")
     print(f"Started at:       {datetime.now(timezone.utc).isoformat()}")
-    print(f"Default watchlist: {', '.join(DEFAULT_WATCHLIST)}")
     print(f"Heartbeat:         {HEARTBEAT_SEC}s")
     print("Scanner window:    9:00–9:29 AM ET (Tier1 >4%, Tier2 >2%, RVOL > 1.0×)")
     print("Entry window:      9:30–11:00 AM ET (IEX delay; bars arrive ~10:15 AM)")

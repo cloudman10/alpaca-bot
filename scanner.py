@@ -66,7 +66,7 @@ _scan_tier: int = 0   # 0=default, 1=tier1 (>4%), 2=tier2 (>2%)
 def get_scan_tier() -> int:
     """Return the tier detected by the most recent scan.
 
-    0 = default watchlist (no gap candidates)
+    0 = no gap candidates (bot stands down for the session)
     1 = Tier 1 (gap > 4%) — full position, VWAP entry
     2 = Tier 2 (gap > 2%) — half position, 15-min high breakout entry
     """
@@ -302,7 +302,7 @@ def run_gap_scanner(
 
     Tier 1 (gap > 4%): Full position size (8% of equity), VWAP pullback entry.
     Tier 2 (gap > 2%): Half position size (4% of equity), 15-min high breakout entry.
-    Default: no gap candidates — return DEFAULT_WATCHLIST, no gap entry attempted.
+    Default: no gap candidates — return [], bot stands down for the session.
 
     Call get_scan_tier() after this returns to determine which tier fired.
     """
@@ -337,10 +337,10 @@ def run_gap_scanner(
         logger.info("=== Dynamic watchlist finalized (%d symbols): %s ===", len(tier2), tier2)
         return tier2
 
-    # ── No candidates — default watchlist ────────────────────────────────────
+    # ── No candidates — stand down ───────────────────────────────────────────
     _scan_tier = 0
     logger.warning(
-        "No gap candidates (Tier1 or Tier2) — falling back to default watchlist: %s",
-        DEFAULT_WATCHLIST,
+        "No gap candidates (Tier1 or Tier2) — 0 genuine gap candidates found meeting criteria. "
+        "Standing down to prevent strategy drift.",
     )
-    return DEFAULT_WATCHLIST
+    return []

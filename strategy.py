@@ -172,7 +172,7 @@ def detect_signal(
         "vwap":        vwap,
         "tier":        1,
         "reason":      (
-            f"Tier 1 gap detected (>4%%) | VWAP reclaim | RSI={rsi:.1f} | "
+            f"Tier 1 Gap Pullback Reclaim | RSI={rsi:.1f} | "
             f"prev_low={bar_prev['low']:.2f}<=VWAP={vwap:.2f} | "
             f"vol={curr_vol:.0f}/{vol_avg * VOL_MULT:.0f}"
         ),
@@ -247,7 +247,7 @@ def detect_tier2_signal(
         "stop_loss":   stop_loss,
         "tier":        2,
         "reason":      (
-            f"Tier 2 gap detected (>2%%) | 15-min high breakout | "
+            f"Tier 2 Opening Range Breakout | "
             f"entry={curr_close:.2f} > opening_high={opening_high:.2f} | "
             f"stop={stop_loss:.2f} (opening_low)"
         ),
