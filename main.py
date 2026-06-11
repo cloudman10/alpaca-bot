@@ -77,6 +77,18 @@ logger = logging.getLogger(__name__)
 _HEARTBEAT_PATH = Path.home() / "TradingApp/logs/heartbeat.json"
 _HEARTBEAT_KEY  = "bot2"
 
+_HB_FILE = Path.home() / "TradingApp/logs/heartbeat_bot2.txt"
+
+
+def _write_main_heartbeat() -> None:
+    """Write epoch seconds to heartbeat_bot2.txt on every loop iteration,
+    including the overnight sleep inner loop, so healthcheck sees a live bot
+    at all times and not just during active trading hours."""
+    try:
+        _HB_FILE.write_text(str(int(time.time())))
+    except Exception:
+        pass
+
 
 def _write_heartbeat() -> None:
     """Atomically update bot2's entry in the shared heartbeat file."""
@@ -560,8 +572,10 @@ def main():
                 # suspend, so the counter under-counts elapsed wall-clock time and the
                 # bot can sleep past the next trading session silently.
                 while not _is_active_period():
+                    _write_main_heartbeat()
                     time.sleep(60)
                 continue
+            _write_main_heartbeat()
             time.sleep(HEARTBEAT_SEC)
             scan()
             _reconnect_attempts = 0

@@ -201,6 +201,7 @@ The Marshal Agent (`~/TradingApp/agents/marshal_agent.py`) runs a daily strategy
 | May 23 | Modified: main.py,strategy.py, | (see commit message) | ✅ Done |
 | May 26 | Modified: main.py,strategy.py, | (see commit message) | ✅ Done |
 | May 30 | Modified: main.py,scanner.py,strategy.py, | (see commit message) | ✅ Done |
+| Jun 11 | Modified: main.py, | (see commit message) | ✅ Done |
 
 ### Output files
 
